@@ -31,6 +31,14 @@ module a {
     }
   }
 
+  typedef my-union3 {
+     type union {
+       type uint32;
+       type string;
+     }
+     default "dummy";
+  }
+
   feature foo {
     status obsolete;
   }
@@ -116,6 +124,14 @@ module a {
         }
       }
     }
+    leaf a_union {
+        type my-union1;
+        default "my-default-1";
+    }
+    leaf b_union {
+        type my-union3;
+        default "my-default-2";
+    }
   }
 
   identity xx;
@@ -143,5 +159,17 @@ module a {
     type uint16 {
       range "5..5000 | 5500..6000";
     }
+  }
+
+  leaf-list baz2 {
+    type string;
+    min-elements 1;
+    max-elements 4;
+  }
+
+  leaf-list baz3 {
+    type string;
+    min-elements 2;
+    max-elements 4;
   }
 }
