@@ -1,6 +1,5 @@
 MANIFEST
 TAGS
-build
 dist
 # created during build:
 pyang.egg-info
