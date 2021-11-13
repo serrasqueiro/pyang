@@ -90,13 +90,10 @@ _keyword_prefer_single_quote_arg = (
 )
 
 _keyword_with_path_arg = (
-## FIXME: change these when emit_path_arg does a good job
-#    'augment',
-#    'refine',
-#    'deviation',
-## FIXME: uncomment this and run tests/test_yang/g--yang-line-length_50
-##        it doesn't look good
-#    'path',
+    'augment',
+    'refine',
+    'deviation',
+    'path',
 )
 
 _kwd_class = {
@@ -157,8 +154,8 @@ def make_link_list(ctx, stmt, link_list):
 
 def emit_stmt(ctx, stmt, fd, level, prev_kwd, prev_kwd_class, islast,
               indent, indentstep, link_list):
-    # line end comment has been printed
     if is_line_end_comment(stmt):
+        # line end comments has been printed after last meaningful statement
         return
 
     if ctx.opts.yang_remove_unused_imports and stmt.keyword == 'import':
@@ -223,8 +220,8 @@ def emit_stmt(ctx, stmt, fd, level, prev_kwd, prev_kwd_class, islast,
         elif stmt.keyword in _keyword_with_path_arg:
             # special code for path argument; pretty-prints a long path with
             # line breaks
-            arg_on_new_line = emit_path_arg(keywordstr, stmt.arg, fd,
-                                            indent, max_line_len, line_len, eol)
+           arg_on_new_line = emit_path_arg(keywordstr, stmt.arg, fd,
+                                           indent, max_line_len, line_len, eol)
         elif stmt.keyword in grammar.stmt_map:
             (arg_type, _subspec) = grammar.stmt_map[stmt.keyword]
             if (arg_type in _non_quote_arg_type or
@@ -246,7 +243,7 @@ def emit_stmt(ctx, stmt, fd, level, prev_kwd, prev_kwd_class, islast,
     fd.write(eol)
 
     next_stmt = link_list.get(stmt, None)
-    emit_line_end_comments_after(stmt, next_stmt, link_list, fd, False)
+    emit_line_end_comments(stmt, next_stmt, link_list, fd, False)
     fd.write('\n')
 
     if len(stmt.substmts) > 0:
@@ -281,7 +278,7 @@ def emit_stmt(ctx, stmt, fd, level, prev_kwd, prev_kwd_class, islast,
         last_substmt = link_list['last']
         if last_substmt in link_list:
             last_substmt = link_list[last_substmt]
-        emit_line_end_comments_after(stmt, last_substmt, link_list, fd, True)
+        emit_line_end_comments(stmt, last_substmt, link_list, fd, True)
         fd.write('\n')
 
     if (not islast and
@@ -290,16 +287,22 @@ def emit_stmt(ctx, stmt, fd, level, prev_kwd, prev_kwd_class, islast,
          stmt.keyword in _keyword_with_trailing_blank_line)):
         fd.write('\n')
 
-def emit_line_end_comments_after(stmt, last_substmt, link_list, fd, need_same_level):
-    while last_substmt is not None:
+def emit_line_end_comments(stmt, next_stmt, link_list, fd, same_level):
+    """
+    emit line end comment stmts, there are some cases:
+    1. after "{"
+    2. after "}"
+    3. multi line end comments should be printed in oneline
+    """
+    while next_stmt is not None:
         is_sub_level = False
-        if not need_same_level:
-            is_sub_level = last_substmt.parent == stmt
-        if (is_line_end_comment(last_substmt) and
-                (last_substmt.parent == stmt.parent or (not need_same_level and is_sub_level))):
-            fd.write(' ' + last_substmt.arg)
-            if last_substmt in link_list:
-                last_substmt = link_list[last_substmt]
+        if not same_level:
+            is_sub_level = next_stmt.stmt_parent == stmt
+        if (is_line_end_comment(next_stmt) and
+                (next_stmt.stmt_parent == stmt.stmt_parent or (not same_level and is_sub_level))):
+            fd.write(' ' + next_stmt.arg)
+            if next_stmt in link_list:
+                next_stmt = link_list[next_stmt]
             else:
                 return
         else:
@@ -395,16 +398,15 @@ def emit_path_arg(keywordstr, arg, fd, indent, max_line_len, line_len, eol):
         fd.write(" " + quote + arg + quote)
         return False
 
-    ## FIXME: we should split the path on '/' and '[]' into multiple lines
-    ## and then print each line
-
     num_chars = max_line_len - line_len
     if num_chars <= 0:
         # really small max_line_len; we give up
         fd.write(" " + quote + arg + quote)
         return False
 
-    while num_chars > 2 and arg[num_chars - 1:num_chars].isalnum():
+    while num_chars > 2 and arg[num_chars - 1:num_chars] != '/':
+        num_chars -= 1
+    if arg[num_chars - 1:num_chars] == '/':
         num_chars -= 1
     fd.write(" " + quote + arg[:num_chars] + quote)
     arg = arg[num_chars:]
@@ -412,12 +414,24 @@ def emit_path_arg(keywordstr, arg, fd, indent, max_line_len, line_len, eol):
     while arg != '':
         line_len = len(
             "%s%s %s%s%s%s" % (indent, keyword_cont, quote, arg, quote, eol))
-        num_chars = len(arg) - (line_len - max_line_len)
-        while num_chars > 2 and arg[num_chars - 1:num_chars].isalnum():
-            num_chars -= 1
-        fd.write('\n' + indent + keyword_cont + " " +
-                 quote + arg[:num_chars] + quote)
-        arg = arg[num_chars:]
+        if line_len <= max_line_len:
+            fd.write('\n' + indent + keyword_cont + " " +
+                     quote + arg + quote)
+            arg = ''
+        else:
+            # we need to split
+            num_chars = len(arg) - (line_len - max_line_len)
+            while num_chars > 2 and arg[num_chars - 1:num_chars] != '/':
+                num_chars -= 1
+            if arg[num_chars - 1:num_chars] == '/':
+                # split on /
+                num_chars -= 1
+            else:
+                # print as much as possible
+                num_chars = len(arg) - (line_len - max_line_len)
+            fd.write('\n' + indent + keyword_cont + " " +
+                     quote + arg[:num_chars] + quote)
+            arg = arg[num_chars:]
 
 def emit_arg(keywordstr, stmt, fd, indent, indentstep, max_line_len, line_len):
     """Heuristically pretty print the argument string with double quotes"""

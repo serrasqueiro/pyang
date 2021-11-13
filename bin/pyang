@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+""" pyang fork
+
+Based on pyang dev5dot0_202110_1
+"""
+
 import sys
 import os
 import optparse
@@ -16,9 +21,26 @@ from pyang import repository
 from pyang import statements
 from pyang import syntax
 
+# pylint: disable=missing-function-docstring, unused-argument, no-else-return
 
-def run():
+DEBUG = 0
+PATCH_LEVEL = 52
+BASIC_DEFAULT_OPTS = (
+    "--strict --canonical",
+)
 
+
+def main():
+    err = sys.stderr
+    param = sys.argv[1:]
+    these = ' '.join(BASIC_DEFAULT_OPTS).split(" ") + guess_paths(err, os.environ)
+    args = [sys.argv[0]] + these + param
+    if DEBUG > 0:
+        print("Args:", args)
+    run(args)
+
+def run(args:list):
+    """ Main pyang run """
     usage = """%prog [options] [<filename>...]
 
 Validates the YANG module in <filename> (or stdin), and all its dependencies."""
@@ -26,9 +48,9 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
     plugindirs = []
     # check for --plugindir
     idx = 1
-    while '--plugindir' in sys.argv[idx:]:
-        idx = idx + sys.argv[idx:].index('--plugindir')
-        plugindirs.append(sys.argv[idx+1])
+    while '--plugindir' in args[idx:]:
+        idx = idx + args[idx:].index('--plugindir')
+        plugindirs.append(args[idx+1])
         idx = idx + 1
     plugin.init(plugindirs)
 
@@ -128,6 +150,9 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
                              dest="outfile",
                              help="Write the output to OUTFILE instead " \
                              "of stdout."),
+        optparse.make_option("-T", "--tee",
+                             dest="tee",
+                             help="Also write to OUTFILE"),
         optparse.make_option("-F", "--features",
                              metavar="FEATURES",
                              dest="features",
@@ -195,8 +220,8 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
                                    yang path."),
         ]
 
-    optparser = optparse.OptionParser(usage, add_help_option = False)
-    optparser.version = '%prog ' + pyang.__version__
+    optparser = optparse.OptionParser(usage, add_help_option=False)
+    optparser.version = '%prog ' + pyang.__version__ + f"p{PATCH_LEVEL:03}"
     optparser.add_options(optlist)
 
     for p in plugin.plugins:
@@ -208,6 +233,7 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
         sys.stderr.write("no format specified\n")
         sys.exit(1)
 
+    args = expand_from_args(args)
     filenames = args
 
     # Parse hello if present
@@ -227,7 +253,12 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
             fd = sys.stdin.buffer
         hel = hello.HelloParser().parse(fd)
 
+    # Rebuild o.path list
+    o.path += guess_paths(None, os.environ, False)
+    # ...and move on!
     path = os.pathsep.join(o.path)
+    if DEBUG > 0:
+        print("Debug: path list:", type(o.path), o.path)
 
     # add standard search path
     if len(o.path) == 0:
@@ -528,6 +559,23 @@ Validates the YANG module in <filename> (or stdin), and all its dependencies."""
             fd.close()
             os.rename(tmpfile, o.outfile)
 
+    if emit_obj is not None and len(modules) > 0:
+        tmpfile = None
+        if o.tee is None:
+            sys.exit(0)
+        fdtee = open(o.tee, "w", encoding="UTF-8")
+        try:
+            emit_obj.emit(ctx, modules, fdtee)
+        except error.EmitError as e:
+            if e.msg != "":
+                sys.stderr.write(e.msg + '\n')
+            sys.exit(1)
+        fdtee.close()
+        if os.name == "nt":
+            fdtee = open(o.tee, "r", encoding="UTF-8")
+            data = fdtee.read()
+            fdtee = open(o.tee, "wb")
+            fdtee.write(data.encode("UTF-8"))
     sys.exit(exit_code)
 
 def parse_features_string(s):
@@ -541,5 +589,58 @@ def parse_features_string(s):
             features = rest.split(',')
             return modulename, features
 
+def expand_from_args(args:list) -> list:
+    res = []
+    for entry in args:
+        if entry.endswith("@"):
+            files = yang_files(entry[:-1])
+            res += files
+        else:
+            res.append(entry)
+    return res
+
+def yang_files(path:str) -> list:
+    """ Returns an ordered list of Yang files """
+    def valid_yang(path:str, is_file:bool) -> bool:
+        if not is_file:
+            return False
+        return path.lower().endswith(".yang")
+
+    files = [
+        item.path for item in os.scandir(path) if valid_yang(item.path, item.is_file())
+    ]
+    res = sorted(files, key=str.casefold)
+    if DEBUG > 0:
+        print("FILES:", res)
+    return res
+
+def guess_paths(err, env: dict, arg_like=True) -> list:
+    """ Returns an empty list if $YANG_CONF is not defined.
+    Note, this is not 'YANG_MODPATH'
+    """
+    res = []
+    if "YANG_CONF" not in env:
+        return []
+    paths = []
+    path_conf = env["YANG_CONF"]
+    path_conf = path_conf.replace("%USERPROFILE%\\", env["USERPROFILE"] + "\\")
+    data = open(path_conf, "r").readlines()
+    data = [line.rstrip() for line in data if line.strip()]
+    for line in data:
+        if line.startswith("#"):
+            continue
+        if line.startswith("path+="):
+            path = line[len("path+="):]
+            paths.append(path)
+        else:
+            if err:
+                err.write(f"Invalid token: '{line}'\n")
+    for path in paths:
+        if arg_like:
+            res.append("-p")
+        res.append(path)
+    return res
+
+
 if __name__ == '__main__':
-    run()
+    main()
