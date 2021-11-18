@@ -244,7 +244,7 @@ def v_chk_namespace(ctx, stmt, namespace_prefixes):
             if stmt.arg == prefix + stmt.i_module.arg:
                 return
         err_add(ctx.errors, stmt.pos, 'LINT_BAD_NAMESPACE_VALUE',
-                namespace_prefixes[0] + stmt.i_module.arg)
+                '|'.join([pfix + stmt.i_module.arg for pfix in namespace_prefixes]))
 
 def v_chk_module_name(ctx, stmt, modulename_prefixes):
     if modulename_prefixes:
