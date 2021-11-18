@@ -12,6 +12,9 @@ from pyang import error
 from pyang.error import err_add
 from pyang.plugins import lint
 
+LEAN = 1
+
+
 def pyang_plugin_init():
     plugin.register_plugin(IETFPlugin())
 
@@ -81,8 +84,9 @@ class IETFPlugin(lint.LintPlugin):
                 self.mmap[s.i_module.arg]['found_8174'] = True
                 arg = arg[:m.start()] + arg[m.end():]
             if re_tlp.search(arg) is None:
-                err_add(ctx.errors, s.pos,
-                        'IETF_MISSING_TRUST_LEGAL_PROVISIONING', ())
+                if LEAN == 0:
+                    err_add(ctx.errors, s.pos,
+                            'IETF_MISSING_TRUST_LEGAL_PROVISIONING', ())
         if not self.mmap[s.i_module.arg]['found_2119_keywords']:
             if re_2119_keywords.search(arg) is not None:
                 self.mmap[s.i_module.arg]['found_2119_keywords'] = True

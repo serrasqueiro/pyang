@@ -24,7 +24,7 @@ from pyang import syntax
 # pylint: disable=missing-function-docstring, unused-argument, no-else-return
 
 DEBUG = 0
-PATCH_LEVEL = 52
+PATCH_LEVEL = 53
 BASIC_DEFAULT_OPTS = (
     "--strict --canonical",
 )
