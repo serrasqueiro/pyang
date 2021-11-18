@@ -13,7 +13,6 @@ i_smi_oid built from the smiv2:oid and smiv2:subid statements.
 
 import re
 
-import pyang
 from pyang import plugin
 from pyang import syntax
 from pyang import grammar
@@ -50,10 +49,10 @@ def pyang_plugin_init():
     grammar.register_extension_module(smi_module_name)
 
     # Register the special grammar
-    for (stmt, occurance, (arg, rules), add_to_stmts) in smi_stmts:
+    for stmt, occurence, (arg, rules), add_to_stmts in smi_stmts:
         grammar.add_stmt((smi_module_name, stmt), (arg, rules))
         grammar.add_to_stmts_rules(add_to_stmts,
-                                   [((smi_module_name, stmt), occurance)])
+                                   [((smi_module_name, stmt), occurence)])
 
     # Add validation step
     statements.add_validation_phase('smi_set_oid', after='inherit_properties')
@@ -72,7 +71,7 @@ def pyang_plugin_init():
 
 smi_stmts = [
 
-    # (<keyword>, <occurance when used>,
+    # (<keyword>, <occurence when used>,
     #  (<argument type name | None>, <substmts>),
     #  <list of keywords where <keyword> can occur>)
 

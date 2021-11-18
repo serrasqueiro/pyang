@@ -1,15 +1,12 @@
 import copy
 import re
-import sys
 
 from . import util
-from .util import attrsearch, keysearch, prefix_to_module, \
-    prefix_to_modulename_and_revision
-from .error import err_add
 from . import types
 from . import syntax
 from . import grammar
 from . import xpath
+from .error import err_add
 
 ### Functions that plugins can use
 
@@ -29,21 +26,23 @@ def add_validation_phase(phase, before=None, after=None):
     # otherwise append at the end
     _validation_phases.append(phase)
 
-def add_validation_fun(phase, keywords, f):
+def _sequence(one, two):
+    """Return function calling two functions in order"""
+    if one is None:
+        return two
+    elif two is None:
+        return one
+    return lambda *args, **kargs: (one(*args, **kargs), two(*args, **kargs))[1]
+
+def add_validation_fun(phase, keywords, fun):
     """Add a validation function to some phase in the framework.
 
-    Function `f` is called for each valid occurance of each keyword in
+    Function `fun` is called for each valid occurence of each keyword in
     `keywords`.
     Can be used by plugins to do special validation of extensions."""
     for keyword in keywords:
-        if (phase, keyword) in _validation_map:
-            oldf = _validation_map[(phase, keyword)]
-            def newf(ctx, s):
-                oldf(ctx, s)
-                f(ctx, s)
-            _validation_map[(phase, keyword)] = newf
-        else:
-            _validation_map[(phase, keyword)] = f
+        _validation_map[phase, keyword] = _sequence(
+            _validation_map.get((phase, keyword)), fun)
 
 def add_validation_var(var_name, var_fun):
     """Add a validation variable to the framework.
@@ -83,23 +82,23 @@ def add_copy_augment_keyword(keyword):
 def add_xpath_function(name, input_params, output_param):
     xpath.add_extra_xpath_function(name, input_params, output_param)
 
-def add_refinement_element(keyword, element, merge = False, v_fun=None):
+def add_refinement_element(keyword, element, merge=False, v_fun=None):
     """Add an element to the <keyword>'s list of refinements"""
-    for (key, valid_keywords, m, v_fun) in _refinements:
+    for key, valid_keywords, _, _ in _refinements:
         if key == keyword:
             valid_keywords.append(element)
             return
     _refinements.append((keyword, [element], merge, v_fun))
 
 def add_deviation_element(keyword, element):
-  """Add an element to the <keyword>'s list of deviations.
+    """Add an element to the <keyword>'s list of deviations.
 
-  Can be used by plugins that add support for specific extension
-  statements."""
-  if keyword in _valid_deviations:
-      _valid_deviations[keyword].append(element)
-  else:
-      _valid_deviations[keyword] = [element]
+    Can be used by plugins that add support for specific extension
+    statements."""
+    if keyword in _valid_deviations:
+        _valid_deviations[keyword].append(element)
+    else:
+        _valid_deviations[keyword] = [element]
 
 ### Exceptions
 
@@ -117,7 +116,7 @@ re_path = re.compile('(.*)/(.*)')
 re_deref = re.compile(r'deref\s*\(\s*(.*)\s*\)/\.\./(.*)')
 re_and_or = re.compile(r'\band\b|\bor\b')
 
-data_definition_keywords = ['container', 'leaf', 'leaf-list', 'list',
+data_definition_keywords = ['container', 'leaf', 'leaf-list', 'list', 'case',
                             'choice', 'anyxml', 'anydata', 'uses', 'augment']
 
 _validation_phases = [
@@ -173,7 +172,7 @@ _validation_phases = [
 
     # strict phase: check YANG strictness
     'strict',
-    ]
+]
 
 _validation_map = {
     ('init', 'module'):lambda ctx, s: v_init_module(ctx, s),
@@ -226,6 +225,8 @@ _validation_map = {
         lambda ctx, s: v_unique_name_leaf_list(ctx, s),
 
     ('reference_1', 'list'):lambda ctx, s:v_reference_list(ctx, s),
+    ('reference_1', 'action'):lambda ctx, s:v_reference_action(ctx, s),
+    ('reference_1', 'notification'):lambda ctx, s:v_reference_action(ctx, s),
     ('reference_1', 'choice'):lambda ctx, s: v_reference_choice(ctx, s),
     ('reference_2', 'leaf'):lambda ctx, s:v_reference_leaf_leafref(ctx, s),
     ('reference_2', 'leaf-list'):lambda ctx, s:v_reference_leaf_leafref(ctx, s),
@@ -240,13 +241,13 @@ _validation_map = {
     ('reference_3', 'deviation'):lambda ctx, s:v_reference_deviation(ctx, s),
     ('reference_3', 'deviate'):lambda ctx, s:v_reference_deviate(ctx, s),
     ('reference_4', 'deviation'):lambda ctx, s:v_reference_deviation_4(ctx, s),
+    ('reference_4', 'revision'):lambda ctx, s:v_reference_revision(ctx, s),
 
     ('unused', 'module'):lambda ctx, s: v_unused_module(ctx, s),
     ('unused', 'submodule'):lambda ctx, s: v_unused_module(ctx, s),
     ('unused', 'typedef'):lambda ctx, s: v_unused_typedef(ctx, s),
     ('unused', 'grouping'):lambda ctx, s: v_unused_grouping(ctx, s),
-
-    }
+}
 
 _v_i_children = {
     'unique_name':True,
@@ -278,12 +279,12 @@ _keyword_with_children = {
     'notification':True,
     'rpc':True,
     'action':True,
-    }
+}
 
 _validation_variables = [
     ('$has_children', lambda keyword: keyword in _keyword_with_children),
     ('$extension', lambda keyword: util.is_prefixed(keyword)),
-    ]
+]
 
 data_keywords = ['leaf', 'leaf-list', 'container', 'list', 'choice', 'case',
                  'anyxml', 'anydata', 'action', 'rpc', 'notification']
@@ -330,12 +331,17 @@ _singleton_keywords = {
     'mandatory':True,
     'min-elements':True,
     'max-elements':True
-    }
+}
+
+_deviate_delete_singleton_keywords = {
+    'units':True,
+    'default':True
+}
 
 _valid_deviations = {
     'type':['leaf', 'leaf-list'],
     'units':['leaf', 'leaf-list'],
-    'default':['leaf', 'choice'],
+    'default':['leaf', 'leaf-list', 'choice'],
     'config':['leaf', 'choice', 'container', 'list', 'leaf-list'],
     'mandatory':['leaf', 'choice'],
     'min-elements':['leaf-list', 'list'],
@@ -355,8 +361,7 @@ def validate_module(ctx, module):
     def iterate(stmt, phase):
         # if the grammar is not yet checked or if it is checked and
         # valid, then we continue.
-        if (hasattr(stmt, 'is_grammatically_valid') and
-            stmt.is_grammatically_valid == False):
+        if getattr(stmt, 'is_grammatically_valid', None) is False:
             return
         # first check an exact match
         key = (phase, stmt.keyword)
@@ -367,9 +372,9 @@ def validate_module(ctx, module):
             if res == 'stop':
                 raise Abort
         # then also run match by special variable
-        for (var_name, var_f) in _validation_variables:
-            key = (phase, var_name)
-            if key in _validation_map and var_f(stmt.keyword) == True:
+        for var_name, var_f in _validation_variables:
+            key = phase, var_name
+            if key in _validation_map and var_f(stmt.keyword) is True:
                 f = _validation_map[key]
                 res = f(ctx, stmt)
                 if res == 'stop':
@@ -487,9 +492,8 @@ def v_init_module(ctx, stmt):
 def v_init_extension(ctx, stmt):
     """find the modulename of the prefix, and set `stmt.keyword`"""
     (prefix, identifier) = stmt.raw_keyword
-    (modname, revision) = \
-        prefix_to_modulename_and_revision(stmt.i_module, prefix,
-                                          stmt.pos, ctx.errors)
+    (modname, revision) = util.prefix_to_modulename_and_revision(
+        stmt.i_module, prefix, stmt.pos, ctx.errors)
     stmt.keyword = (modname, identifier)
     stmt.i_extension_modulename = modname
     stmt.i_extension_revision = revision
@@ -510,13 +514,13 @@ def v_init_import(ctx, stmt):
 
 def v_grammar_module(ctx, stmt):
     # check the statement hierarchy
-    grammar.chk_module_statements(ctx, stmt, ctx.canonical)
+    canonical = (ctx.canonical and stmt.i_is_primary_module)
+    grammar.chk_module_statements(ctx, stmt, canonical)
     # check revision statements order
     prev = None
     stmt.i_latest_revision = None
     for r in stmt.search('revision'):
-        if (stmt.i_latest_revision is None or
-            r.arg > stmt.i_latest_revision):
+        if stmt.i_latest_revision is None or r.arg > stmt.i_latest_revision:
             stmt.i_latest_revision = r.arg
         if prev is not None and r.arg > prev:
             err_add(ctx.errors, r.pos, 'REVISION_ORDER', ())
@@ -542,14 +546,14 @@ def v_grammar_unique_defs(ctx, stmt):
             [('feature', 'FEATURE_ALREADY_DEFINED', stmt.i_features),
              ('identity', 'IDENTITY_ALREADY_DEFINED', stmt.i_identities),
              ('extension', 'EXTENSION_ALREADY_DEFINED', stmt.i_extensions)])
-    for (keyword, errcode, dict) in defs:
+    for keyword, errcode, stmtdefs in defs:
         for definition in stmt.search(keyword):
-            if definition.arg in dict:
-                other = dict[definition.arg]
+            if definition.arg in stmtdefs:
+                other = stmtdefs[definition.arg]
                 err_add(ctx.errors, definition.pos,
                         errcode, (definition.arg, other.pos))
             else:
-                dict[definition.arg] = definition
+                stmtdefs[definition.arg] = definition
 
 def v_grammar_identifier(ctx, stmt):
     try:
@@ -578,7 +582,7 @@ def v_import_module(ctx, stmt):
             mymodulename = b.arg
         else:
             mymodulename = None
-    def add_module(i):
+    def add_module(i, primary_module):
         # check if the module to import is already added
         modulename = i.arg
         r = i.search_one('revision-date')
@@ -592,7 +596,8 @@ def v_import_module(ctx, stmt):
             err_add(ctx.errors, i.pos,
                     'CIRCULAR_DEPENDENCY', ('module', modulename))
         # try to add the module to the context
-        m = ctx.search_module(i.pos, modulename, rev)
+        m = ctx.search_module(i.pos, modulename, rev,
+                              primary_module=primary_module)
         if m is not None:
             validate_module(ctx, m)
         if (m is not None and r is not None and
@@ -603,13 +608,13 @@ def v_import_module(ctx, stmt):
         return m
 
     for i in imports:
-        module = add_module(i)
+        module = add_module(i, False)
         if module is not None and module.keyword != 'module':
             err_add(ctx.errors, i.pos,
                     'BAD_IMPORT', (module.keyword, i.arg))
 
     for i in includes:
-        submodule = add_module(i)
+        submodule = add_module(i, stmt.i_is_primary_module)
         if submodule is not None and submodule.keyword != 'submodule':
             err_add(ctx.errors, i.pos,
                     'BAD_INCLUDE', (submodule.keyword, i.arg))
@@ -645,8 +650,8 @@ def v_import_module(ctx, stmt):
                         stmt.i_children.append(ch)
                 # verify that the submodule's definitions do not collide
                 # with the module's definitions
-                defs = \
-                    [(submodule.i_typedefs, stmt.i_typedefs,
+                defs = [
+                     (submodule.i_typedefs, stmt.i_typedefs,
                       'TYPE_ALREADY_DEFINED'),
                      (submodule.i_groupings, stmt.i_groupings,
                       'GROUPING_ALREADY_DEFINED'),
@@ -656,28 +661,28 @@ def v_import_module(ctx, stmt):
                       'IDENTITY_ALREADY_DEFINED'),
                      (submodule.i_extensions, stmt.i_extensions,
                       'EXTENSION_ALREADY_DEFINED')]
-                for (subdict, dict, errcode) in defs:
-                    for name in subdict:
-                        subdefinition = subdict[name]
-                        if name in dict:
+                for substmtdefs, stmtdefs, errcode in defs:
+                    for name in substmtdefs:
+                        subdefinition = substmtdefs[name]
+                        if name in stmtdefs:
                             # when the same submodule is inlcuded twice
                             # (e.g. by the module and by another submodule)
                             # the same definition will exist multiple times.
-                            other = dict[name]
+                            other = stmtdefs[name]
                             if other != subdefinition:
                                 err_add(ctx.errors, other.pos,
                                         errcode, (name, subdefinition.pos))
                         else:
-                            dict[name] = subdefinition
+                            stmtdefs[name] = subdefinition
 
 ### type phase
 
 def v_type_typedef(ctx, stmt):
     if hasattr(stmt, 'i_is_validated'):
-        if stmt.i_is_validated == True:
+        if stmt.i_is_validated is True:
             # this type has already been validated
             return
-        elif stmt.i_is_circular == True:
+        elif stmt.i_is_circular is True:
             return
         elif stmt.i_is_validated == 'in_progress':
             err_add(ctx.errors, stmt.pos,
@@ -703,7 +708,7 @@ def v_type_typedef(ctx, stmt):
             err_add(ctx.errors, stmt.pos, 'TYPE_ALREADY_DEFINED',
                     (name, ptype.pos))
     type_ = stmt.search_one('type')
-    if type_ is None or type_.is_grammatically_valid == False:
+    if type_ is None or type_.is_grammatically_valid is False:
         # error is already reported by grammar check
         stmt.i_is_validated = True
         return
@@ -712,7 +717,7 @@ def v_type_typedef(ctx, stmt):
 
     # keep track of our leafref
     type_spec = type_.i_type_spec
-    if type(type_spec) == types.PathTypeSpec:
+    if isinstance(type_spec, types.PathTypeSpec):
         stmt.i_leafref = type_spec
 
     def check_circular_typedef(ctx, type_):
@@ -720,7 +725,7 @@ def v_type_typedef(ctx, stmt):
         v_type_type(ctx, type_)
         # check the direct typedef
         if (type_.i_typedef is not None and
-            type_.i_typedef.is_grammatically_valid == True):
+            type_.i_typedef.is_grammatically_valid is True):
             v_type_typedef(ctx, type_.i_typedef)
         # check all union's types
         membertypes = type_.search('type')
@@ -741,18 +746,19 @@ def v_type_typedef(ctx, stmt):
         stmt.i_default = type_.i_typedef.i_default
         stmt.i_default_str = type_.i_typedef.i_default_str
         type_.i_type_spec.validate(ctx.errors, stmt.pos,
-                                   stmt.i_default,
+                                   stmt.i_default, stmt.i_module,
                                    ' for the inherited default value ')
     elif (default is not None and
           default.arg is not None and
           type_.i_type_spec is not None):
         stmt.i_default = type_.i_type_spec.str_to_val(ctx.errors,
                                                       default.pos,
-                                                      default.arg)
+                                                      default.arg,
+                                                      stmt.i_module)
         stmt.i_default_str = default.arg
         if stmt.i_default is not None:
             type_.i_type_spec.validate(ctx.errors, default.pos,
-                                       stmt.i_default,
+                                       stmt.i_default, stmt.i_module,
                                        ' for the default value')
 
 def v_type_type(ctx, stmt):
@@ -766,11 +772,8 @@ def v_type_type(ctx, stmt):
     stmt.i_type_spec = None
     stmt.i_typedef = None
     # Find the base type_spec
-    name = stmt.arg
-    if name.find(":") == -1:
-        prefix = None
-    else:
-        [prefix, name] = name.split(':', 1)
+    prefix, name = util.split_identifier(stmt.arg)
+
     if prefix is None or stmt.i_module.i_prefix == prefix:
         # check local typedefs
         stmt.i_typedef = search_typedef(stmt, name)
@@ -784,7 +787,7 @@ def v_type_type(ctx, stmt):
                 return
         else:
             # ensure the typedef is validated
-            if stmt.i_typedef.is_grammatically_valid == True:
+            if stmt.i_typedef.is_grammatically_valid is True:
                 v_type_typedef(ctx, stmt.i_typedef)
             else:
                 stmt.i_typedef.i_default = None
@@ -792,7 +795,8 @@ def v_type_type(ctx, stmt):
             stmt.i_typedef.i_is_unused = False
     else:
         # this is a prefixed name, check the imported modules
-        pmodule = prefix_to_module(stmt.i_module, prefix, stmt.pos, ctx.errors)
+        pmodule = util.prefix_to_module(
+            stmt.i_module, prefix, stmt.pos, ctx.errors)
         if pmodule is None:
             return
         stmt.i_typedef = search_typedef(pmodule, name)
@@ -830,17 +834,17 @@ def v_type_type(ctx, stmt):
 
     # check the range restriction
     stmt.i_ranges = []
-    range = stmt.search_one('range')
-    if (range is not None and
-        'range' not in stmt.i_type_spec.restrictions()):
-        err_add(ctx.errors, range.pos, 'BAD_RESTRICTION', 'range')
-    elif range is not None:
-        stmt.i_is_derived = True
-        ranges_spec = types.validate_range_expr(ctx.errors, range, stmt)
-        if ranges_spec is not None:
-            stmt.i_ranges = ranges_spec[0]
-            stmt.i_type_spec = types.RangeTypeSpec(stmt.i_type_spec,
-                                                   ranges_spec)
+    rangestmt = stmt.search_one('range')
+    if rangestmt is not None:
+        if 'range' not in stmt.i_type_spec.restrictions():
+            err_add(ctx.errors, rangestmt.pos, 'BAD_RESTRICTION', 'range')
+        else:
+            stmt.i_is_derived = True
+            ranges_spec = types.validate_range_expr(ctx.errors, rangestmt, stmt)
+            if ranges_spec is not None:
+                stmt.i_ranges = ranges_spec[0]
+                stmt.i_type_spec = types.RangeTypeSpec(stmt.i_type_spec,
+                                                       ranges_spec)
 
     # check the length restriction
     stmt.i_lengths = []
@@ -850,7 +854,7 @@ def v_type_type(ctx, stmt):
         err_add(ctx.errors, length.pos, 'BAD_RESTRICTION', 'length')
     elif length is not None:
         stmt.i_is_derived = True
-        lengths_spec = types.validate_length_expr(ctx.errors, length)
+        lengths_spec = types.validate_length_expr(ctx.errors, length, stmt)
         if lengths_spec is not None:
             stmt.i_lengths = lengths_spec[0]
             stmt.i_type_spec = types.LengthTypeSpec(stmt.i_type_spec,
@@ -858,10 +862,10 @@ def v_type_type(ctx, stmt):
 
     # check the pattern restrictions
     patterns = stmt.search('pattern')
-    if (patterns != [] and
+    if (patterns and
         'pattern' not in stmt.i_type_spec.restrictions()):
         err_add(ctx.errors, patterns[0].pos, 'BAD_RESTRICTION', 'pattern')
-    elif patterns != []:
+    elif patterns:
         stmt.i_is_derived = True
         pattern_specs = [types.validate_pattern_expr(ctx.errors, p)
                          for p in patterns]
@@ -879,7 +883,7 @@ def v_type_type(ctx, stmt):
                 ('leafref', 'path'))
     elif path is not None:
         stmt.i_is_derived = True
-        if path.is_grammatically_valid == True:
+        if path.is_grammatically_valid is True:
             path_spec = types.validate_path_expr(ctx.errors, path)
             if path_spec is not None:
                 stmt.i_type_spec = types.PathTypeSpec(stmt.i_type_spec,
@@ -888,11 +892,11 @@ def v_type_type(ctx, stmt):
 
     # check the base restriction
     bases = stmt.search('base')
-    if bases != [] and stmt.arg != 'identityref':
+    if bases and stmt.arg != 'identityref':
         err_add(ctx.errors, bases[0].pos, 'BAD_RESTRICTION', 'base')
     elif len(bases) > 1 and stmt.i_module.i_version == '1':
         err_add(ctx.errors, bases[1].pos, 'UNEXPECTED_KEYWORD', 'base')
-    elif stmt.arg == 'identityref' and bases == []:
+    elif stmt.arg == 'identityref' and not bases:
         err_add(ctx.errors, stmt.pos, 'MISSING_TYPE_SPEC',
                 ('identityref', 'base'))
     else:
@@ -900,7 +904,7 @@ def v_type_type(ctx, stmt):
         for base in bases:
             v_type_base(ctx, base)
             if base.i_identity is not None:
-               idbases.append(base)
+                idbases.append(base)
         if len(idbases) > 0:
             stmt.i_is_derived = True
             stmt.i_type_spec = types.IdentityrefTypeSpec(idbases)
@@ -913,20 +917,20 @@ def v_type_type(ctx, stmt):
     if (req_inst is not None and stmt.i_type_spec.name == 'leafref' and
         stmt.i_module.i_version == '1'):
         err_add(ctx.errors, req_inst.pos, 'BAD_RESTRICTION', 'require-instance')
-    if (req_inst is not None):
+    if req_inst is not None:
         stmt.i_type_spec.require_instance = req_inst.arg == 'true'
 
     # check the enums - only applicable when the type is the builtin
     # enumeration type in YANG version 1, and for derived enumerations in 1.1
     enums = stmt.search('enum')
-    if (enums != [] and
+    if (enums and
         ('enum' not in stmt.i_type_spec.restrictions() or
          stmt.i_module.i_version == '1' and stmt.arg != 'enumeration')):
         err_add(ctx.errors, enums[0].pos, 'BAD_RESTRICTION', 'enum')
-    elif stmt.arg == 'enumeration' and enums == []:
+    elif stmt.arg == 'enumeration' and not enums:
         err_add(ctx.errors, stmt.pos, 'MISSING_TYPE_SPEC',
                 ('enumeration', 'enum'))
-    elif enums != []:
+    elif enums:
         stmt.i_is_derived = True
 
         enum_spec = types.validate_enums(ctx.errors, enums, stmt)
@@ -937,14 +941,14 @@ def v_type_type(ctx, stmt):
     # check the bits - only applicable when the type is the builtin
     # bits type in YANG version 1, and for derived bits in 1.1
     bits = stmt.search('bit')
-    if (bits != [] and
+    if (bits and
         ('bit' not in stmt.i_type_spec.restrictions() or
          stmt.i_module.i_version == '1' and stmt.arg != 'bits')):
         err_add(ctx.errors, bits[0].pos, 'BAD_RESTRICTION', 'bit')
-    elif stmt.arg == 'bits' and bits == []:
+    elif stmt.arg == 'bits' and not bits:
         err_add(ctx.errors, stmt.pos, 'MISSING_TYPE_SPEC',
                 ('bits', 'bit'))
-    elif bits != []:
+    elif bits:
         stmt.i_is_derived = True
         bit_spec = types.validate_bits(ctx.errors, bits, stmt)
         if bit_spec is not None:
@@ -953,15 +957,15 @@ def v_type_type(ctx, stmt):
 
     # check the union types
     membertypes = stmt.search('type')
-    if membertypes != [] and stmt.arg != 'union':
+    if membertypes and stmt.arg != 'union':
         err_add(ctx.errors, membertypes[0].pos, 'BAD_RESTRICTION', 'union')
-    elif membertypes == [] and stmt.arg == 'union':
+    elif not membertypes and stmt.arg == 'union':
         err_add(ctx.errors, stmt.pos, 'MISSING_TYPE_SPEC',
                 ('union', 'type'))
-    elif membertypes != []:
+    elif membertypes:
         stmt.i_is_derived = True
         for t in membertypes:
-            if t.is_grammatically_valid == True:
+            if t.is_grammatically_valid is True:
                 v_type_type(ctx, t)
         stmt.i_type_spec = types.UnionTypeSpec(membertypes)
         if stmt.i_module.i_version == '1':
@@ -971,10 +975,33 @@ def v_type_type(ctx, stmt):
                         (t.arg, t.pos))
                 return False
 
+def v_check_if_feature(ctx, type, defval):
+    for s in type.substmts:
+        if defval == s.arg:
+            feat = s.search_one('if-feature')
+            if feat is not None:
+                err_add(ctx.errors, feat.pos, 'DEFAULT_AND_IFFEATURE', ())
+            return
+
+def v_check_default(ctx, cur_type, def_value):
+    if def_value is None:
+        return
+    if cur_type.arg in types.yang_type_specs.keys():
+        if cur_type.arg == 'enumeration':
+            v_check_if_feature(ctx, cur_type, def_value)
+        elif cur_type.arg == 'bits':
+            for b in def_value:
+                v_check_if_feature(ctx, cur_type, b)
+        return
+    else:
+        if cur_type.i_typedef is not None:
+            new_type = cur_type.i_typedef.search_one('type')
+            v_check_default(ctx, new_type, def_value)
+
 def v_type_leaf(ctx, stmt):
     stmt.i_default = None
     stmt.i_default_str = ""
-    if _v_type_common_leaf(ctx, stmt) == False:
+    if _v_type_common_leaf(ctx, stmt) is False:
         return
     # check if we have a default value
     default = stmt.search_one('default')
@@ -982,23 +1009,26 @@ def v_type_leaf(ctx, stmt):
     if default is not None and type_.i_type_spec is not None :
         defval = type_.i_type_spec.str_to_val(ctx.errors,
                                               default.pos,
-                                              default.arg)
+                                              default.arg,
+                                              stmt.i_module)
         stmt.i_default = defval
         stmt.i_default_str = default.arg
         if defval is not None:
             type_.i_type_spec.validate(ctx.errors, default.pos,
-                                       defval, ' for the default value')
+                                       defval, stmt.i_module,
+                                       ' for the default value')
     elif (default is None and
           type_.i_typedef is not None and
-          hasattr(type_.i_typedef, 'i_default') and
-          type_.i_typedef.i_default is not None):
+          getattr(type_.i_typedef, 'i_default', None) is not None):
         stmt.i_default = type_.i_typedef.i_default
         stmt.i_default_str = type_.i_typedef.i_default_str
         # validate the type's default value with our new restrictions
         if type_.i_type_spec is not None:
             type_.i_type_spec.validate(ctx.errors, stmt.pos,
-                                       stmt.i_default,
+                                       stmt.i_default, stmt.i_module,
                                        ' for the default  value')
+
+    v_check_default(ctx, type_, stmt.i_default)
 
     if default is not None:
         m = stmt.search_one('mandatory')
@@ -1008,7 +1038,7 @@ def v_type_leaf(ctx, stmt):
 
 def v_type_leaf_list(ctx, stmt):
     stmt.i_default = []
-    if _v_type_common_leaf(ctx, stmt) == False:
+    if _v_type_common_leaf(ctx, stmt) is False:
         return
     # check if we have default values
     type_ = stmt.search_one('type')
@@ -1016,29 +1046,42 @@ def v_type_leaf_list(ctx, stmt):
         if type_.i_type_spec is not None :
             defval = type_.i_type_spec.str_to_val(ctx.errors,
                                                   default.pos,
-                                                  default.arg)
+                                                  default.arg,
+                                                  stmt.i_module)
             if defval is not None:
                 stmt.i_default.append(defval)
                 type_.i_type_spec.validate(ctx.errors, default.pos,
-                                           defval, ' for the default value')
+                                           defval, stmt.i_module,
+                                           ' for the default value')
 
-    if stmt.i_default != []:
-        m = stmt.search_one('min-elements')
-        if m is not None and int(m.arg) > 0:
-            d = stmt.search_one('default')
-            err_add(ctx.errors, d.pos, 'DEFAULT_AND_MIN_ELEMENTS', ())
+    min_value = stmt.search_one('min-elements')
+    max_value = stmt.search_one('max-elements')
+
+    if (stmt.i_default and min_value is not None
+            and min_value.arg.isnumeric() and int(min_value.arg) > 0):
+        d = stmt.search_one('default')
+        err_add(ctx.errors, d.pos, 'DEFAULT_AND_MIN_ELEMENTS', ())
+        return False
+
+    if (min_value is not None and min_value.arg.isnumeric()
+            and max_value is not None and max_value.arg.isnumeric()):
+        if int(min_value.arg) > int(max_value.arg):
+            err_add(ctx.errors, min_value.pos, 'MAX_ELEMENTS_AND_MIN_ELEMENTS', ())
             return False
 
-    if (stmt.i_default == [] and
-          type_.i_typedef is not None and
-          hasattr(type_.i_typedef, 'i_default') and
-          type_.i_typedef.i_default is not None):
+    if (not stmt.i_default
+        and type_.i_typedef is not None
+        and getattr(type_.i_typedef, 'i_default', None) is not None):
+
         stmt.i_default.append(type_.i_typedef.i_default)
         # validate the type's default value with our new restrictions
         if type_.i_type_spec is not None:
             type_.i_type_spec.validate(ctx.errors, stmt.pos,
                                        type_.i_typedef.i_default,
+                                       stmt.i_module,
                                        ' for the default  value')
+    for s in stmt.i_default:
+        v_check_default(ctx, type_, s)
 
 def _v_type_common_leaf(ctx, stmt):
     stmt.i_leafref = None # path_type_spec
@@ -1046,7 +1089,7 @@ def _v_type_common_leaf(ctx, stmt):
     stmt.i_leafref_expanded = False
     # check our type
     type_ = stmt.search_one('type')
-    if type_ is None or type_.is_grammatically_valid == False:
+    if type_ is None or type_.is_grammatically_valid is False:
         # error is already reported by grammar check
         return False
 
@@ -1058,11 +1101,11 @@ def _v_type_common_leaf(ctx, stmt):
 
     # keep track of our leafref
     type_spec = type_.i_type_spec
-    if type(type_spec) == types.PathTypeSpec:
+    if isinstance(type_spec, types.PathTypeSpec):
         stmt.i_leafref = type_spec
 
 def chk_status(ctx, x, y):
-    if (x.top.i_modulename != y.top.i_modulename):
+    if x.top.i_modulename != y.top.i_modulename:
         return
     def status(s):
         stat = s.search_one('status')
@@ -1078,7 +1121,7 @@ def chk_status(ctx, x, y):
 
 def v_type_grouping(ctx, stmt):
     if hasattr(stmt, 'i_is_validated'):
-        if stmt.i_is_validated == True:
+        if stmt.i_is_validated is True:
             # this grouping has already been validated
             return True
         elif stmt.i_is_validated == 'in_progress':
@@ -1100,9 +1143,8 @@ def v_type_grouping(ctx, stmt):
 
     # search for circular grouping definitions
     def validate_uses(s):
-        if (s.keyword == "uses" and
-            hasattr(s, 'is_grammatically_valid') and
-            s.is_grammatically_valid == True):
+        if (s.keyword == "uses"
+            and getattr(s, 'is_grammatically_valid', None) is True):
             v_type_uses(ctx, s, no_error_report=True)
 
     iterate_stmt(stmt, validate_uses)
@@ -1112,19 +1154,16 @@ def v_type_grouping(ctx, stmt):
 
 def v_type_uses(ctx, stmt, no_error_report=False):
     # Find the grouping
-    name = stmt.arg
-    if name.find(":") == -1:
-        prefix = None
-    else:
-        [prefix, name] = name.split(':', 1)
+    prefix, name = util.split_identifier(stmt.arg)
+
     if hasattr(stmt, 'i_grouping'):
-        if stmt.i_grouping is None and no_error_report == False:
+        if stmt.i_grouping is None and no_error_report is False:
             if prefix is None or stmt.i_module.i_prefix == prefix:
                 # check local groupings
                 pmodule = stmt.i_module
             else:
-                pmodule = prefix_to_module(stmt.i_module, prefix,
-                                           stmt.pos, ctx.errors)
+                pmodule = util.prefix_to_module(
+                    stmt.i_module, prefix, stmt.pos, ctx.errors)
                 if pmodule is None:
                     return
             err_add(ctx.errors, stmt.pos,
@@ -1136,17 +1175,18 @@ def v_type_uses(ctx, stmt, no_error_report=False):
         # check local groupings
         pmodule = stmt.i_module
         i_grouping = search_grouping(stmt, name)
-        if i_grouping is not None and i_grouping.is_grammatically_valid == True:
-            if v_type_grouping(ctx, i_grouping) == True:
+        if i_grouping is not None and i_grouping.is_grammatically_valid is True:
+            if v_type_grouping(ctx, i_grouping) is True:
                 stmt.i_grouping = i_grouping
 
     else:
         # this is a prefixed name, check the imported modules
-        pmodule = prefix_to_module(stmt.i_module, prefix, stmt.pos, ctx.errors)
+        pmodule = util.prefix_to_module(
+            stmt.i_module, prefix, stmt.pos, ctx.errors)
         if pmodule is None:
             return
         stmt.i_grouping = search_grouping(pmodule, name)
-    if stmt.i_grouping is None and no_error_report == False:
+    if stmt.i_grouping is None and no_error_report is False:
         err_add(ctx.errors, stmt.pos,
                 'GROUPING_NOT_FOUND', (name, pmodule.arg))
     if stmt.i_grouping is not None:
@@ -1197,7 +1237,7 @@ def v_type_extension(ctx, stmt):
 
 def v_type_feature(ctx, stmt):
     if hasattr(stmt, 'i_is_validated'):
-        if stmt.i_is_validated == True:
+        if stmt.i_is_validated is True:
             # this feature has already been validated
             return
         elif stmt.i_is_validated == 'in_progress':
@@ -1223,39 +1263,36 @@ def v_type_if_feature(ctx, stmt, no_error_report=False):
     expr = syntax.parse_if_feature_expr(stmt.arg)
     if stmt.i_module.i_version == '1':
         # version 1 allows only a single value as if-feature
-        if type(expr) != type(''):
+        if not isinstance(expr, util.str_types):
             err_add(ctx.errors, stmt.pos,
                     'BAD_VALUE', (stmt.arg, 'identifier-ref'))
             return
 
-    def eval(expr):
-        if type(expr) == type(''):
+    def eval_if_feature(expr):
+        if isinstance(expr, util.str_types):
             return has_feature(expr)
         else:
-            (op, op1, op2) = expr
+            op, op1, op2 = expr
             if op == 'not':
-                return not eval(op1)
+                return not eval_if_feature(op1)
             elif op == 'and':
-                return eval(op1) and eval(op2)
+                return eval_if_feature(op1) and eval_if_feature(op2)
             elif op == 'or':
-                return eval(op1) or eval(op2)
+                return eval_if_feature(op1) or eval_if_feature(op2)
 
     def has_feature(name):
         # raises Abort if the feature is not defined
         # returns True if we compile with the feature
         # returns False if we compile without the feature
         found = None
-        if name.find(":") == -1:
-            prefix = None
-        else:
-            [prefix, name] = name.split(':', 1)
+        prefix, name = util.split_identifier(name)
         if prefix is None or stmt.i_module.i_prefix == prefix:
             # check local features
             pmodule = stmt.i_module
         else:
             # this is a prefixed name, check the imported modules
-            pmodule = prefix_to_module(stmt.i_module, prefix,
-                                       stmt.pos, ctx.errors)
+            pmodule = util.prefix_to_module(
+                stmt.i_module, prefix, stmt.pos, ctx.errors)
             if pmodule is None:
                 raise Abort
         if name in pmodule.i_features:
@@ -1264,12 +1301,13 @@ def v_type_if_feature(ctx, stmt, no_error_report=False):
                 pass
             else:
                 found = pmodule.i_features[name]
+                chk_status(ctx, stmt.parent, found)
                 v_type_feature(ctx, found)
                 if pmodule.i_modulename in ctx.features:
                     if name not in ctx.features[pmodule.i_modulename]:
                         return False
 
-        if found is None and no_error_report == False:
+        if found is None and no_error_report is False:
             err_add(ctx.errors, stmt.pos,
                     'FEATURE_NOT_FOUND', (name, pmodule.arg))
             raise Abort
@@ -1278,23 +1316,20 @@ def v_type_if_feature(ctx, stmt, no_error_report=False):
     # Evaluate the if-feature expression, and verify that all
     # referenced features exist.
     try:
-        if eval(expr) == False:
+        if eval_if_feature(expr) is False:
             stmt.parent.i_not_implemented = True
     except Abort:
         pass
 
 def v_type_status(ctx, stmt):
     if ctx.max_status is not None:
-        def n(s):
-            if s == 'current':    return 0;
-            if s == 'deprecated': return 1;
-            if s == 'obsolete':   return 2;
-        if n(stmt.arg) > n(ctx.max_status):
+        order = ['current', 'deprecated', 'obsolete']
+        if order.index(stmt.arg) > order.index(ctx.max_status):
             stmt.parent.i_not_implemented = True
 
 def v_type_identity(ctx, stmt):
     if hasattr(stmt, 'i_is_validated'):
-        if stmt.i_is_validated == True:
+        if stmt.i_is_validated is True:
             # this identity has already been validated
             return
         elif stmt.i_is_validated == 'in_progress':
@@ -1321,18 +1356,16 @@ def v_type_identity(ctx, stmt):
 def v_type_base(ctx, stmt, no_error_report=False):
     """verify that the referenced identity exists."""
     # Find the identity
-    name = stmt.arg
     stmt.i_identity = None
-    if name.find(":") == -1:
-        prefix = None
-    else:
-        [prefix, name] = name.split(':', 1)
+    prefix, name = util.split_identifier(stmt.arg)
+
     if prefix is None or stmt.i_module.i_prefix == prefix:
         # check local identities
         pmodule = stmt.i_module
     else:
         # this is a prefixed name, check the imported modules
-        pmodule = prefix_to_module(stmt.i_module, prefix, stmt.pos, ctx.errors)
+        pmodule = util.prefix_to_module(
+            stmt.i_module, prefix, stmt.pos, ctx.errors)
         if pmodule is None:
             return
     if name in pmodule.i_identities:
@@ -1342,7 +1375,7 @@ def v_type_base(ctx, stmt, no_error_report=False):
         else:
             stmt.i_identity = i
             v_type_identity(ctx, stmt.i_identity)
-    if stmt.i_identity is None and no_error_report == False:
+    if stmt.i_identity is None and no_error_report is False:
         err_add(ctx.errors, stmt.pos,
                 'IDENTITY_NOT_FOUND', (name, pmodule.arg))
 
@@ -1357,8 +1390,7 @@ def v_type_when(ctx, stmt):
 ### Expand phases
 
 def v_expand_1_children(ctx, stmt):
-    if (hasattr(stmt, 'is_grammatically_valid') and
-        stmt.is_grammatically_valid == False):
+    if getattr(stmt, 'is_grammatically_valid', None) is False:
         return
     if stmt.keyword == 'grouping' and hasattr(stmt, "i_expanded"):
         # already expanded
@@ -1412,7 +1444,7 @@ def v_expand_1_children(ctx, stmt):
     if stmt.keyword == 'grouping':
         stmt.i_expanded = False
     for s in stmt.substmts:
-        if s.keyword in ['input', 'output']:
+        if s.keyword in ['input', 'output'] and hasattr(stmt, 'i_children'):
             # must create a copy of the statement which sets the argument,
             # since we need to keep the original stmt hierarchy valid
             news = s.copy(nocopy=['type','typedef','grouping'])
@@ -1421,8 +1453,8 @@ def v_expand_1_children(ctx, stmt):
             news.arg = news.keyword
             stmt.i_children.append(news)
             v_expand_1_children(ctx, news)
-        elif (s.keyword == 'uses' and hasattr(s, 'is_grammatically_valid') and
-              s.is_grammatically_valid):
+        elif (s.keyword == 'uses'
+              and getattr(s, 'is_grammatically_valid', None)):
             v_expand_1_uses(ctx, s)
             for a in s.search('augment'):
                 v_expand_1_children(ctx, a)
@@ -1444,24 +1476,25 @@ def v_expand_1_children(ctx, stmt):
 
 def v_default(ctx, target, default):
     type_ = target.search_one('type')
-    if (type_ is not None and
-        hasattr(type_, 'i_type_spec') and
-        type_.i_type_spec is not None):
+    if (type_ is not None
+        and getattr(type_, 'i_type_spec', None) is not None):
+
         defval = type_.i_type_spec.str_to_val(ctx.errors,
                                               default.pos,
-                                              default.arg)
+                                              default.arg,
+                                              target.i_module)
         target.i_default = defval
         target.i_default_str = default.arg
         if defval is not None:
             type_.i_type_spec.validate(ctx.errors, default.pos,
-                                       defval, ' for the default value')
+                                       defval, target.i_module,
+                                       ' for the default value')
 
 def v_expand_1_uses(ctx, stmt):
-    if (hasattr(stmt, 'is_grammatically_valid') and
-        stmt.is_grammatically_valid == False):
+    if getattr(stmt, 'is_grammatically_valid', None) is False:
         return
 
-    if stmt.i_grouping is None:
+    if not hasattr(stmt, 'i_grouping') or stmt.i_grouping is None:
         return
 
     # possibly expand any uses within the grouping
@@ -1474,9 +1507,9 @@ def v_expand_1_uses(ctx, stmt):
                     for m in syntax.re_schema_node_id_part.findall(pstr)]
         node = stmt.parent
         # recurse down the path
-        for (prefix, identifier) in path:
-            module = prefix_to_module(stmt.i_module, prefix, refinement.pos,
-                                      ctx.errors)
+        for prefix, identifier in path:
+            module = util.prefix_to_module(
+                stmt.i_module, prefix, refinement.pos, ctx.errors)
             if hasattr(node, 'i_children'):
                 if module is None:
                     return None
@@ -1534,7 +1567,7 @@ def v_expand_1_uses(ctx, stmt):
     iffeatures = list(stmt.search('if-feature'))
     # first, copy the grouping into our i_children
     for g in stmt.i_grouping.i_children:
-        if util.keysearch(g.keyword, 0, subspec) == None:
+        if util.keysearch(g.keyword, 0, subspec) is None:
             err_add(ctx.errors, stmt.pos, 'UNEXPECTED_KEYWORD_USES',
                     (util.keyword_to_str(g.raw_keyword),
                      util.keyword_to_str(stmt.parent.raw_keyword),
@@ -1564,11 +1597,13 @@ def v_expand_1_uses(ctx, stmt):
                         # otherwise, copy the i_child
                         newx = x.copy(new, stmt,
                                       nocopy=['type','uses', 'unique',
+                                              'if-feature',
                                               'typedef','grouping'],
                                       copyf=post_copy)
                         new.i_children.append(newx)
         newg = g.copy(stmt.parent, stmt,
-                      nocopy=['type','uses','unique','typedef','grouping'],
+                      nocopy=['type','uses','unique', 'if-feature',
+                              'typedef','grouping'],
                       copyf=post_copy)
         for s in whens:
             news = s.copy(newg)
@@ -1602,7 +1637,7 @@ def v_expand_1_uses(ctx, stmt):
             continue
         refined[target] = refinement.pos
 
-        for (keyword, valid_keywords0, merge, v_fun) in _refinements:
+        for keyword, valid_keywords0, merge, v_fun in _refinements:
             valid_keywords = filter_valid_keywords(valid_keywords0, stmt)
             if merge:
                 merge_from_refinement(target, refinement, keyword,
@@ -1628,7 +1663,7 @@ def v_expand_1_uses(ctx, stmt):
 def filter_valid_keywords(keywords, stmt):
     res = []
     for i in keywords:
-        if type(i) == type(()):
+        if isinstance(i, tuple):
             if stmt.i_module.i_version != '1':
                 res.append(i[1])
             else:
@@ -1638,51 +1673,50 @@ def filter_valid_keywords(keywords, stmt):
     return res
 
 def v_inherit_properties(ctx, stmt, child=None):
-    def iter(s, config_value, allow_explicit):
+    def walk(s, config_value, allow_explicit):
         cfg = s.search_one('config')
         if cfg is not None:
             if config_value is None and not allow_explicit:
                 err_add(ctx.errors, cfg.pos, 'CONFIG_IGNORED', ())
-            elif cfg.arg == 'true' and config_value == False:
+            elif cfg.arg == 'true' and config_value is False:
                 err_add(ctx.errors, cfg.pos, 'INVALID_CONFIG', ())
             elif cfg.arg == 'true':
                 config_value = True
             elif cfg.arg == 'false':
                 config_value = False
         s.i_config = config_value
-        if (hasattr(s, 'is_grammatically_valid') and
-            s.is_grammatically_valid == False):
+        if getattr(s, 'is_grammatically_valid', None) is False:
             return
         if s.keyword in _keyword_with_children:
             for ch in s.search('grouping'):
-                iter(ch, None, True)
+                walk(ch, None, True)
             for ch in s.search('grouping'):
-                iter(ch, None, True)
+                walk(ch, None, True)
             for ch in s.i_children:
                 if ch.keyword in _keywords_with_no_explicit_config:
-                    iter(ch, None, False)
+                    walk(ch, None, False)
                 else:
                     if hasattr(ch, 'i_uses'):
-                        iter(ch, config_value, True)
+                        walk(ch, config_value, True)
                     else:
-                        iter(ch, config_value, allow_explicit)
+                        walk(ch, config_value, allow_explicit)
 
     if child is not None:
-        iter(child, stmt.i_config, True)
+        walk(child, stmt.i_config, True)
         return
 
     for s in stmt.search('grouping'):
-        iter(s, None, True)
+        walk(s, None, True)
     for s in stmt.search('augment'):
         if hasattr(stmt,'i_config'):
-           iter(s, stmt.i_config, True)
+            walk(s, stmt.i_config, True)
         else:
-           iter(s, True, True)
+            walk(s, True, True)
     for s in stmt.i_children:
         if s.keyword in _keywords_with_no_explicit_config:
-            iter(s, None, False)
+            walk(s, None, False)
         else:
-            iter(s, True, True)
+            walk(s, True, True)
 
     # do not recurse in this phase
     return 'continue'
@@ -1722,11 +1756,11 @@ def v_expand_2_augment(ctx, stmt):
                 err_add(ctx.errors, m.pos, 'AUGMENT_MANDATORY', s.arg)
         elif s.keyword == 'list' or s.keyword == 'leaf-list':
             m = s.search_one('min-elements')
-            if m is not None and int(m.arg) >= 1:
+            if m is not None and m.arg.isnumeric() and int(m.arg) >= 1:
                 err_add(ctx.errors, m.pos, 'AUGMENT_MANDATORY', s.arg)
         elif s.keyword == 'container':
             p = s.search_one('presence')
-            if p == None:
+            if p is None:
                 for sc in s.i_children:
                     chk_mandatory(sc)
     # if we're augmenting another module, make sure we're not
@@ -1758,6 +1792,18 @@ def v_expand_2_augment(ctx, stmt):
                 node.i_children.append(tmp)
                 tmp.parent = node
 
+    def is_expected_keyword(parent, child):
+        if parent.keyword == '__tmp_augment__':
+            return True
+        if parent.keyword == 'choice' and child.keyword != 'case':
+            (_arg_type, subspec) = grammar.stmt_map['case']
+        else:
+            (_arg_type, subspec) = grammar.stmt_map[parent.keyword]
+        subspec = grammar.flatten_spec(subspec)
+        if util.keysearch(child.keyword, 0, subspec) is None:
+            return False
+        return True
+
     for c in stmt.i_children:
         c.i_augment = stmt
         if hasattr(stmt, 'i_not_implemented'):
@@ -1787,14 +1833,32 @@ def v_expand_2_augment(ctx, stmt):
                         (stmt.arg, stmt.pos, c.arg, ch.pos))
                 return
         elif stmt.i_target_node.keyword == 'choice' and c.keyword != 'case':
-            # create an artifical case node for the shorthand
-            new_case = create_new_case(ctx, stmt.i_target_node, c, expand=False)
-            new_case.parent = stmt.i_target_node
-            v_inherit_properties(ctx, stmt.i_target_node, new_case)
+            if is_expected_keyword(stmt.i_target_node, c) is True:
+                # create an artificial case node for the shorthand
+                new_case = create_new_case(ctx, stmt.i_target_node, c, expand=False)
+                new_case.parent = stmt.i_target_node
+                v_inherit_properties(ctx, stmt.i_target_node, new_case)
+            else:
+                err_add(ctx.errors, stmt.pos, 'UNEXPECTED_KEYWORD_AUGMENT',
+                        (util.keyword_to_str(c.raw_keyword),
+                         util.keyword_to_str(stmt.i_target_node.raw_keyword),
+                         c.pos))
+        elif (stmt.i_target_node.keyword not in
+              ('container', 'list', 'choice', 'case', 'input',
+                  'output', 'notification', '__tmp_augment__')):
+            nd = stmt.i_target_node
+            err_add(ctx.errors, stmt.pos, 'BAD_TARGET_NODE',
+                    (nd.i_module.i_modulename, nd.arg, nd.keyword))
         else:
-            stmt.i_target_node.i_children.append(c)
-            c.parent = stmt.i_target_node
-            v_inherit_properties(ctx, stmt.i_target_node, c)
+            if is_expected_keyword(stmt.i_target_node, c) is True:
+                stmt.i_target_node.i_children.append(c)
+                c.parent = stmt.i_target_node
+                v_inherit_properties(ctx, stmt.i_target_node, c)
+            else:
+                err_add(ctx.errors, stmt.pos, 'UNEXPECTED_KEYWORD_AUGMENT',
+                        (util.keyword_to_str(c.raw_keyword),
+                         util.keyword_to_str(stmt.i_target_node.raw_keyword),
+                         c.pos))
     for s in stmt.substmts:
         if s.keyword in _copy_augment_keywords:
             stmt.i_target_node.substmts.append(s)
@@ -1806,6 +1870,9 @@ def create_new_case(ctx, choice, child, expand=True):
     child.parent = new_case
     new_case.i_children = [child]
     new_case.i_module = child.i_module
+    s = child.search_one('status')
+    if s is not None:
+        new_case.substmts.append(s)
     choice.i_children.append(new_case)
     if expand:
         v_expand_1_children(ctx, child)
@@ -1818,9 +1885,9 @@ def v_unique_name_defintions(ctx, stmt):
     defs = [('typedef', 'TYPE_ALREADY_DEFINED', stmt.i_typedefs),
             ('grouping', 'GROUPING_ALREADY_DEFINED', stmt.i_groupings)]
     def f(s):
-        for (keyword, errcode, dict) in defs:
-            if s.keyword == keyword and s.arg in dict:
-                err_add(ctx.errors, dict[s.arg].pos,
+        for keyword, errcode, stmtdefs in defs:
+            if s.keyword == keyword and s.arg in stmtdefs:
+                err_add(ctx.errors, stmtdefs[s.arg].pos,
                         errcode, (s.arg, s.pos))
 
     for i in stmt.search('include'):
@@ -1837,30 +1904,29 @@ def v_unique_name_children(ctx, stmt):
 
     def sort_pos(p1, p2):
         if p1.line < p2.line:
-            return (p1,p2)
+            return p1, p2
         else:
-            return (p2,p1)
+            return p2, p1
 
-    dict = {}
-    chs = stmt.i_children
+    children = {}
 
     def check(c):
-        key = (c.i_module.i_modulename, c.arg)
-        if key in dict:
-            dup = dict[key]
-            (minpos, maxpos) = sort_pos(c.pos, dup.pos)
+        key = c.i_module.i_modulename, c.arg
+        if key in children:
+            dup = children[key]
+            minpos, maxpos = sort_pos(c.pos, dup.pos)
             pos = chk_uses_pos(c, maxpos)
             err_add(ctx.errors, pos,
                     'DUPLICATE_CHILD_NAME', (stmt.arg, stmt.pos, c.arg, minpos))
         else:
-            dict[key] = c
+            children[key] = c
         # also check all data nodes in the cases
         if c.keyword == 'choice':
             for case in c.i_children:
                 for cc in case.i_children:
                     check(cc)
 
-    for c in chs:
+    for c in stmt.i_children:
         check(c)
 
 def v_unique_name_leaf_list(ctx, stmt):
@@ -1877,14 +1943,45 @@ def v_unique_name_leaf_list(ctx, stmt):
 
 ### Reference phase
 
+def v_reference_action(ctx, stmt):
+    def iterate(s):
+        if s.parent is None:
+            return
+        else:
+            parent = s.parent
+            if parent.keyword == "list":
+                key = parent.search_one('key')
+                if (parent.i_config is False and key is None
+                    and parent.i_module.i_version == '1.1'):
+                    err_add(ctx.errors, stmt.pos, 'BAD_ANCESTOR',
+                            (stmt.keyword))
+                    return
+            elif parent.keyword in ("rpc", "action", "notification"):
+                err_add(ctx.errors, stmt.pos, 'BAD_ANCESTOR2',
+                        (stmt.keyword, parent.keyword))
+                return
+            iterate(parent)
+
+    iterate(stmt)
+
+def v_reference_revision(ctx, stmt):
+    if not ctx.verify_revision_history:
+        return
+    if not stmt.i_module.i_is_primary_module:
+        return
+    if stmt.arg == stmt.parent.i_latest_revision:
+        return
+    # search_module adds an error if the module isn't found
+    ctx.search_module(stmt.pos, stmt.i_module.arg, stmt.arg)
+
 def v_reference_list(ctx, stmt):
-    if hasattr(stmt, 'i_is_validated') and stmt.i_is_validated == True:
+    if getattr(stmt, 'i_is_validated', None) is True:
         return
     stmt.i_is_validated = True
 
     def v_key():
         key = stmt.search_one('key')
-        if stmt.i_config == True and key is None:
+        if stmt.i_config is True and key is None:
             if hasattr(stmt, 'i_uses_pos'):
                 err_add(ctx.errors, stmt.i_uses_pos, 'NEED_KEY_USES',
                         (stmt.pos))
@@ -1897,20 +1994,18 @@ def v_reference_list(ctx, stmt):
             for x in key.arg.split():
                 if x == '':
                     continue
-                if x.find(":") == -1:
-                    name = x
-                else:
-                    [prefix, name] = x.split(':', 1)
-                    if prefix != stmt.i_module.i_prefix:
-                        err_add(ctx.errors, key.pos, 'BAD_KEY', x)
-                        return
-                ptr = attrsearch(name, 'arg', stmt.i_children)
+                prefix, name = util.split_identifier(x)
+                if prefix is not None and prefix != stmt.i_module.i_prefix:
+                    err_add(ctx.errors, key.pos, 'BAD_KEY', x)
+                    return
+                ptr = util.attrsearch(name, 'arg', stmt.i_children)
                 if x in found:
                     err_add(ctx.errors, key.pos, 'DUPLICATE_KEY', x)
                     return
-                elif ((ptr is None) or (ptr.keyword != 'leaf')):
+                elif ptr is None or ptr.keyword != 'leaf':
                     err_add(ctx.errors, key.pos, 'BAD_KEY', x)
                     return
+                chk_status(ctx, ptr.parent, ptr)
                 type_ = ptr.search_one('type')
                 if stmt.i_module.i_version == '1':
                     if type_ is not None:
@@ -1921,7 +2016,7 @@ def v_reference_list(ctx, stmt):
                             return
                 default = ptr.search_one('default')
                 if default is not None:
-                        err_add(ctx.errors, default.pos, 'KEY_HAS_DEFAULT', ())
+                    err_add(ctx.errors, default.pos, 'KEY_HAS_DEFAULT', ())
                 for substmt in ['if-feature', 'when']:
                     s = ptr.search_one(substmt)
                     if s is not None:
@@ -1959,20 +2054,17 @@ def v_reference_list(ctx, stmt):
                                            'choice', 'case']:
                         err_add(ctx.errors, u.pos, 'BAD_UNIQUE_PART', x)
                         return
-                    if x.find(":") == -1:
-                        name = x
-                    else:
-                        [prefix, name] = x.split(':', 1)
-                        if prefix != stmt.i_module.i_prefix:
+                    prefix, name = util.split_identifier(x)
+                    if prefix is not None and prefix != stmt.i_module.i_prefix:
                             err_add(ctx.errors, u.pos, 'BAD_UNIQUE_PART', x)
                             return
-                    ptr = attrsearch(name, 'arg', ptr.i_children)
+                    ptr = util.attrsearch(name, 'arg', ptr.i_children)
                     if ptr is None:
                         err_add(ctx.errors, u.pos, 'BAD_UNIQUE_PART', x)
                         return
                     if ptr.keyword == 'list':
                         err_add(ctx.errors, u.pos, 'BAD_UNIQUE_PART_LIST', x)
-                if ((ptr is None) or (ptr.keyword != 'leaf')):
+                if ptr is None or ptr.keyword != 'leaf':
                     err_add(ctx.errors, u.pos, 'BAD_UNIQUE', expr)
                     return
                 if ptr in found:
@@ -1987,7 +2079,7 @@ def v_reference_list(ctx, stmt):
                 # it is part of.
                 ptr.i_uniques.append(u)
                 found.append(ptr)
-            if found == []:
+            if not found:
                 err_add(ctx.errors, u.pos, 'BAD_UNIQUE', u.arg)
                 return
             # check if all leafs in the unique statements are keys
@@ -2001,8 +2093,18 @@ def v_reference_list(ctx, stmt):
             u.i_leafs = found
             stmt.i_unique.append((u, found))
 
+    def v_max_min_elements():
+        min_value = stmt.search_one('min-elements')
+        max_value = stmt.search_one('max-elements')
+        if (min_value is not None and min_value.arg.isnumeric()
+                and max_value is not None and max_value.arg.isnumeric()):
+            if int(min_value.arg) > int(max_value.arg):
+                err_add(ctx.errors, min_value.pos, 'MAX_ELEMENTS_AND_MIN_ELEMENTS', ())
+                return
+
     v_key()
     v_unique()
+    v_max_min_elements()
 
 def v_reference_choice(ctx, stmt):
     """Make sure that the default case exists"""
@@ -2011,37 +2113,37 @@ def v_reference_choice(ctx, stmt):
         m = stmt.search_one('mandatory')
         if m is not None and m.arg == 'true':
             err_add(ctx.errors, stmt.pos, 'DEFAULT_AND_MANDATORY', ())
-        ptr = attrsearch(d.arg, 'arg', stmt.i_children)
+        ptr = util.attrsearch(d.arg, 'arg', stmt.i_children)
         if ptr is None:
             err_add(ctx.errors, d.pos, 'DEFAULT_CASE_NOT_FOUND', d.arg)
         else:
             # make sure there are no mandatory nodes in the default case
             def chk_no_defaults(s):
                 for c in s.i_children:
-                    if c.keyword in ('leaf', 'choice'):
+                    if c.keyword in ('leaf', 'anydata', 'anyxml', 'choice'):
                         m = c.search_one('mandatory')
                         if m is not None and m.arg == 'true':
                             err_add(ctx.errors, c.pos,
                                     'MANDATORY_NODE_IN_DEFAULT_CASE', ())
                     elif c.keyword in ('list', 'leaf-list'):
                         m = c.search_one('min-elements')
-                        if m is not None and int(m.arg) > 0:
+                        if m is not None and m.arg.isnumeric() and int(m.arg) > 0:
                             err_add(ctx.errors, c.pos,
                                     'MANDATORY_NODE_IN_DEFAULT_CASE', ())
                     elif c.keyword == 'container':
                         p = c.search_one('presence')
-                        if p == None or p.arg == 'false':
+                        if p is None or p.arg == 'false':
                             chk_no_defaults(c)
             chk_no_defaults(ptr)
 
 def v_reference_leaf_leafref(ctx, stmt):
     """Verify that all leafrefs in a leaf or leaf-list have correct path"""
 
-    if (hasattr(stmt, 'i_leafref') and
-        stmt.i_leafref is not None and
-        stmt.i_leafref_expanded is False):
+    if (getattr(stmt, 'i_leafref', None) is not None
+        and stmt.i_leafref_expanded is False):
+
         path_type_spec = stmt.i_leafref
-        not_req_inst = not(path_type_spec.require_instance)
+        not_req_inst = not path_type_spec.require_instance
         x = validate_leafref_path(ctx, stmt,
                                   path_type_spec.path_spec,
                                   path_type_spec.path_,
@@ -2070,7 +2172,9 @@ def v_reference_when(ctx, stmt):
 def v_xpath(ctx, stmt):
     if stmt.parent.keyword == 'augment':
         node = stmt.parent.i_target_node
-    elif hasattr(stmt, 'i_origin', ) and stmt.i_origin == 'uses':
+    elif stmt.parent.keyword == 'deviate':
+        node = stmt.parent.parent.i_target_node
+    elif getattr(stmt, 'i_origin', None) == 'uses':
         node = util.data_node_up(stmt.parent)
     else:
         node = stmt.parent
@@ -2082,6 +2186,35 @@ def v_reference_deviation(ctx, stmt):
     stmt.i_target_node = find_target_node(ctx, stmt)
 
 def v_reference_deviate(ctx, stmt):
+    def search_children_config_true(node, target):
+        # the target node's config is set to 'false', and the node underneath it
+        # cannot have 'config' is 'true'
+        if node.keyword in data_definition_keywords:
+            c_config = node.search_one('config')
+            if c_config is not None and c_config.arg == 'true':
+                err_add(ctx.errors, c.pos, 'INVALID_CONFIG', ())
+                return True
+        else:
+            return False
+        if node is None or not hasattr(node, 'i_children'):
+            return False
+        else:
+            for child in node.i_children:
+                if search_children_config_true(child, target):
+                    return True
+            return False
+
+    def inherit_parent_i_config(node, value):
+        if node is None or not hasattr(node, 'i_children'):
+            return
+        else:
+            for child in node.i_children:
+                if child.keyword in data_definition_keywords:
+                    config = child.search_one('config')
+                    if config is None:
+                        child.i_config = value
+                inherit_parent_i_config(child, value)
+
     if stmt.parent.i_target_node is None:
         # this is set in v_reference_deviation above.  if none
         # is found, an error has already been reported.
@@ -2096,8 +2229,7 @@ def v_reference_deviate(ctx, stmt):
             err_add(ctx.errors, siblings[0].pos,
                     'BAD_DEVIATE_WITH_NOT_SUPPORTED', ())
             return
-        if ((t.parent.keyword == 'list') and
-            (t in t.parent.i_key)):
+        if t.parent.keyword == 'list' and t in t.parent.i_key:
             err_add(ctx.errors, stmt.pos, 'BAD_DEVIATE_KEY',
                     (t.i_module.arg, t.arg))
             return
@@ -2116,15 +2248,17 @@ def v_reference_deviate(ctx, stmt):
             del t.parent.substmts[idx]
     elif stmt.arg == 'add':
         for c in stmt.substmts:
-            if (c.keyword == 'config'
-                and hasattr(t, 'i_config')):
+            if c.keyword == '_comment':
+                continue
+            if c.keyword == 'config' and hasattr(t, 'i_config'):
                 # config is special: since it is an inherited property
-                # with a default, all nodes has a config property.  this means
-                # that it can only be replaced.
+                # with a default, all nodes has a config property. this
+                # means that it can only be placed.
                 err_add(ctx.errors, c.pos, 'BAD_DEVIATE_ADD',
                         (c.keyword, t.i_module.arg, t.arg))
+
             elif c.keyword in _singleton_keywords:
-                if t.search_one(c.keyword) != None:
+                if t.search_one(c.keyword) is not None:
                     err_add(ctx.errors, c.pos, 'BAD_DEVIATE_ADD',
                             (c.keyword, t.i_module.arg, t.arg))
                 elif t.keyword not in _valid_deviations[c.keyword]:
@@ -2134,11 +2268,11 @@ def v_reference_deviate(ctx, stmt):
                     t.substmts.append(c)
             else:
                 # multi-valued keyword; just add the statement if it is valid
-                if (c.keyword not in _valid_deviations):
+                if c.keyword not in _valid_deviations:
                     if util.is_prefixed(c.keyword):
                         (prefix, name) = c.keyword
-                        pmodule = prefix_to_module(c.i_module, prefix, c.pos,
-                                                   [])
+                        pmodule = util.prefix_to_module(
+                            c.i_module, prefix, c.pos, [])
                         if (pmodule is not None and
                             pmodule.modulename in grammar.extension_modules):
                             err_add(ctx.errors, c.pos, 'BAD_DEVIATE_TYPE',
@@ -2157,46 +2291,78 @@ def v_reference_deviate(ctx, stmt):
 
                 else:
                     t.substmts.append(c)
-    else: # delete or replace
+    elif stmt.arg == 'replace':
         for c in stmt.substmts:
-            if (c.keyword == 'config'
-                and stmt.arg == 'replace'
-                and hasattr(t, 'i_config')):
+            if c.keyword == '_comment':
+                continue
+            if c.keyword == 'config' and hasattr(t, 'i_config'):
                 # config is special: since it is an inherited property
-                # with a default, all nodes has a config property.  this means
-                # that it can only be replaced.
-                # first, set the property...
-                if c.arg == 'true':
-                    t.i_config = True
-                elif c.arg == 'false':
-                    t.i_config = False
-                # ... and then modify the original statement, if any
+                # with a default, all nodes has a config property.
+                # first, save the old property, and then set the property...
+
                 old = t.search_one(c.keyword)
                 if old is not None:
+                    negc = copy.copy(old)
                     old.arg = c.arg
                 else:
-                    t.substmts.append(c)
-                # make sure the target's children have proper config stmts
-                sub = t.substmts
-                if hasattr(t, 'i_children'):
-                    sub = sub + t.i_children
-                for d in sub:
-                    if d.keyword in data_definition_keywords:
-                        if (hasattr(d, 'i_config') and
-                            d.i_config != t.i_config):
-                            # this child has another config property,
-                            # maybe fix the statment
-                            old = d.search_one('config')
-                            if old is None:
-                                negc = copy.copy(c)
-                                if c.arg == 'true':
-                                    negc.arg = 'false'
-                                else:
-                                    negc.arg = 'true'
-                                d.substmts.append(negc)
+                    # use the t.i_config when the target node doesn't exist
+                    # config statement.
+                    negc = copy.copy(c)
+                    negc.arg = 'true' if t.i_config is True else 'false'
+
+                if c.arg == 'true':
+                    if negc.arg != c.arg:
+                        if (t.parent is not None
+                            and t.parent.i_config is False):
+                            # recover the target node config value when it
+                            # doesn't meet the spec
+                            if old is not None:
+                                old.arg = negc.arg
+                            err_add(ctx.errors, c.pos,
+                                    'INVALID_CONFIG', ())
+                            continue
+                        else:
+                            t.i_config = True
+                else:
+                    if search_children_config_true(t, t):
+                        # recover the target node config value when it
+                        # doesn't meet the spec
+                        if old is not None:
+                            old.arg = negc.arg
+                        continue
+                    else:
+                        t.i_config = False
+                        inherit_parent_i_config(t, t.i_config)
 
             if c.keyword in _singleton_keywords:
                 old = t.search_one(c.keyword)
+            else:
+                old = t.search_one(c.keyword, c.arg)
+            if old is None:
+                if c.keyword != 'config':
+                    err_add(ctx.errors, c.pos, 'BAD_DEVIATE_REP',
+                            (c.keyword, t.i_module.arg, t.arg))
+            else:
+                idx = t.substmts.index(old)
+                del t.substmts[idx]
+                if (c.keyword == 'type'
+                    and c.i_typedef is not None
+                    and ':' not in c.arg
+                    and t.i_module.i_prefix != c.i_module.i_prefix):
+
+                    c.arg = c.i_module.i_prefix + ':' + c.arg
+                t.substmts.append(c)
+    else: # delete
+        for c in stmt.substmts:
+            if c.keyword == '_comment':
+                continue
+            if c.keyword in _singleton_keywords:
+                if c.keyword in _deviate_delete_singleton_keywords:
+                    old = t.search_one(c.keyword)
+                else:
+                    err_add(ctx.errors, c.pos, 'BAD_DEVIATE_DEL2',
+                            (c.keyword, t.i_module.arg, t.arg))
+                    continue
             else:
                 old = t.search_one(c.keyword, c.arg)
             if old is None:
@@ -2205,19 +2371,11 @@ def v_reference_deviate(ctx, stmt):
             else:
                 idx = t.substmts.index(old)
                 del t.substmts[idx]
-                if stmt.arg == 'replace':
-                    if (c.keyword == 'type'
-                        and c.i_typedef is not None
-                        and c.arg.find(":") == -1
-                        and t.i_module.i_prefix !=
-                            c.i_module.i_prefix):
-                        c.arg = c.i_module.i_prefix + ':' + c.arg
-                    t.substmts.append(c)
 
 # after deviation, we need to re-run some of the tests, e.g. if
 # the deviation added a default value it needs to be checked.
 def v_reference_deviation_4(ctx, stmt):
-    if not hasattr(stmt, 'i_target_node') or stmt.i_target_node is None:
+    if getattr(stmt, 'i_target_node', None) is None:
         # this is set in v_reference_deviation above.  if none
         # is found, an error has already been reported.
         return
@@ -2228,6 +2386,11 @@ def v_reference_deviation_4(ctx, stmt):
 def v_recheck_target(ctx, t, reference=False):
     for s in t.search('if-feature'):
         v_type_if_feature(ctx, s)
+    if reference:
+        for s in t.search('must'):
+            v_reference_must(ctx, s)
+        for s in t.search('when'):
+            v_reference_when(ctx, s)
     if t.keyword == 'leaf':
         v_type_leaf(ctx, t)
         if reference:
@@ -2256,14 +2419,14 @@ def v_unused_module(ctx, module):
 def v_unused_typedef(ctx, stmt):
     if stmt.parent.parent is not None:
         # this is a locally scoped typedef
-        if stmt.i_is_unused == True:
+        if stmt.i_is_unused is True:
             err_add(ctx.errors, stmt.pos,
                     'UNUSED_TYPEDEF', stmt.arg)
 
 def v_unused_grouping(ctx, stmt):
     if stmt.parent.parent is not None:
         # this is a locallay scoped grouping
-        if stmt.i_is_unused == True:
+        if stmt.i_is_unused is True:
             err_add(ctx.errors, stmt.pos,
                     'UNUSED_GROUPING', stmt.arg)
 
@@ -2272,10 +2435,7 @@ def v_unused_grouping(ctx, stmt):
 ### Utility functions
 
 def chk_uses_pos(s, pos):
-    if hasattr(s, 'i_uses_pos'):
-        return s.i_uses_pos
-    else:
-        return pos
+    return getattr(s, 'i_uses_pos', pos)
 
 def modulename_to_module(module, modulename, revision=None):
     if modulename == module.arg:
@@ -2284,27 +2444,24 @@ def modulename_to_module(module, modulename, revision=None):
     # loaded; the load might have failed
     return module.i_ctx.get_module(modulename, revision)
 
-def has_type(type, names):
+def has_type(typestmt, names):
     """Return type with name if `type` has name as one of its base types,
     and name is in the `names` list.  otherwise, return None."""
-    if type.arg in names:
-        return type
-    for t in type.search('type'): # check all union's member types
+    if typestmt.arg in names:
+        return typestmt
+    for t in typestmt.search('type'): # check all union's member types
         r = has_type(t, names)
         if r is not None:
             return r
-    if not hasattr(type, 'i_typedef'):
-        return None
-    if (type.i_typedef is not None and
-        hasattr(type.i_typedef, 'i_is_circular') and
-        type.i_typedef.i_is_circular == False):
-        t = type.i_typedef.search_one('type')
+    typedef = getattr(typestmt, 'i_typedef', None)
+    if typedef is not None and getattr(typedef, 'i_is_circular', None) is False:
+        t = typedef.search_one('type')
         if t is not None:
             return has_type(t, names)
     return None
 
 def is_mandatory_node(stmt):
-    if hasattr(stmt, 'i_config') and stmt.i_config == False:
+    if getattr(stmt, 'i_config', True) is False:
         return False
     if stmt.keyword in ('leaf', 'choice', 'anyxml', 'anydata'):
         m = stmt.search_one('mandatory')
@@ -2312,7 +2469,7 @@ def is_mandatory_node(stmt):
             return True
     elif stmt.keyword in ('list', 'leaf-list'):
         m = stmt.search_one('min-elements')
-        if m is not None and int(m.arg) > 0:
+        if m is not None and m.arg.isnumeric() and int(m.arg) > 0:
             return True
     elif stmt.keyword == 'container':
         p = stmt.search_one('presence')
@@ -2325,7 +2482,7 @@ def is_mandatory_node(stmt):
 def search_child(children, modulename, identifier):
     for child in children:
         if child.arg == identifier:
-            if ((child.i_module.i_modulename == modulename) or
+            if (child.i_module.i_modulename == modulename or
                 child.i_module.i_including_modulename is not None and
                 child.i_module.i_including_modulename == modulename):
                 return child
@@ -2337,6 +2494,7 @@ def search_data_node(children, modulename, identifier, last_skipped = None):
 def search_typedef(stmt, name):
     """Search for a typedef in scope
     First search the hierarchy, then the module and its submodules."""
+    orig_stmt = stmt
     mod = stmt.i_orig_module
     while stmt is not None:
         if name in stmt.i_typedefs:
@@ -2349,11 +2507,16 @@ def search_typedef(stmt, name):
                     return None
             return t
         stmt = stmt.parent
+    # if the original statement isn't the original module, try the module
+    # (this covers the case where the statement has been re-parented)
+    if mod is not None and orig_stmt is not mod:
+        return search_typedef(mod, name)
     return None
 
 def search_grouping(stmt, name):
     """Search for a grouping in scope
     First search the hierarchy, then the module and its submodules."""
+    orig_stmt = stmt
     mod = stmt.i_orig_module
     while stmt is not None:
         if name in stmt.i_groupings:
@@ -2366,19 +2529,22 @@ def search_grouping(stmt, name):
                     return None
             return g
         stmt = stmt.parent
+    # if the original statement isn't the original module, try the module
+    # (this covers the case where the statement has been re-parented)
+    if mod is not None and orig_stmt is not mod:
+        return search_grouping(mod, name)
     return None
 
 def search_data_keyword_child(children, modulename, identifier):
     for child in children:
-        if ((child.arg == identifier) and
-            (child.i_module.i_modulename == modulename) and
+        if (child.arg == identifier and
+            child.i_module.i_modulename == modulename and
             child.keyword in data_keywords):
             return child
     return None
 
 def find_target_node(ctx, stmt, is_augment=False):
-    if (hasattr(stmt, 'is_grammatically_valid') and
-        stmt.is_grammatically_valid == False):
+    if getattr(stmt, 'is_grammatically_valid', None) is False:
         return None
     if stmt.arg.startswith("/"):
         is_absolute = True
@@ -2390,13 +2556,12 @@ def find_target_node(ctx, stmt, is_augment=False):
     path = [(m[1], m[2]) for m in syntax.re_schema_node_id_part.findall(arg)]
     # find the module of the first node in the path
     (prefix, identifier) = path[0]
-    module = prefix_to_module(stmt.i_module, prefix, stmt.pos, ctx.errors)
+    module = util.prefix_to_module(stmt.i_module, prefix, stmt.pos, ctx.errors)
     if module is None:
         # error is reported by prefix_to_module
         return None
 
-    if (stmt.parent.keyword in ('module', 'submodule') or
-        is_absolute):
+    if stmt.parent.keyword in ('module', 'submodule') or is_absolute:
         # find the first node
         node = search_child(module.i_children, module.i_modulename, identifier)
         if not is_submodule_included(stmt, node):
@@ -2406,8 +2571,8 @@ def find_target_node(ctx, stmt, is_augment=False):
                     (module.i_modulename, identifier))
             return None
     else:
-        chs = [c for c in stmt.parent.parent.i_children \
-                   if hasattr(c, 'i_uses') and c.i_uses[0] == stmt.parent]
+        chs = [c for c in stmt.parent.parent.i_children
+               if stmt.parent in getattr(c, 'i_uses', [])[:1]]
         node = search_child(chs, module.i_modulename, identifier)
         if not is_submodule_included(stmt, node):
             node = None
@@ -2417,10 +2582,10 @@ def find_target_node(ctx, stmt, is_augment=False):
             return None
 
     # then recurse down the path
-    for (prefix, identifier) in path[1:]:
+    for prefix, identifier in path[1:]:
         if hasattr(node, 'i_children'):
-            module = prefix_to_module(stmt.i_module, prefix, stmt.pos,
-                                      ctx.errors)
+            module = util.prefix_to_module(
+                stmt.i_module, prefix, stmt.pos, ctx.errors)
             if module is None:
                 return None
             child = search_child(node.i_children, module.i_modulename,
@@ -2490,6 +2655,11 @@ def is_submodule_included(src, tgt):
     if (tgt.i_orig_module.keyword == 'submodule' and
         src.i_orig_module != tgt.i_orig_module and
         src.i_orig_module.i_modulename == tgt.i_orig_module.i_modulename):
+        if (src.i_orig_module.keyword == 'submodule' and
+            src.i_orig_module.i_version != '1'):
+            # In 1.1, if both src and tgt are submodules, src doesn't
+            # have to include tgt
+            return True
         if src.i_orig_module.search_one('include',
                                         tgt.i_orig_module.arg) is None:
             return False
@@ -2529,8 +2699,14 @@ def validate_leafref_path(ctx, stmt, path_spec, path,
     def find_identifier(identifier):
         if util.is_prefixed(identifier):
             (prefix, name) = identifier
-            pmodule = prefix_to_module(path.i_module, prefix, stmt.pos,
-                                       ctx.errors)
+            if (path.i_module.keyword == 'submodule' and
+                prefix == local_module.i_prefix and
+                local_module is not None):
+                pmodule = util.prefix_to_module(
+                    local_module, prefix, stmt.pos, ctx.errors)
+            else:
+                pmodule = util.prefix_to_module(
+                    path.i_module, prefix, stmt.pos, ctx.errors)
             if pmodule is None:
                 raise NotFound
             return (pmodule, name)
@@ -2542,12 +2718,12 @@ def validate_leafref_path(ctx, stmt, path_spec, path,
     def is_identifier(x):
         if util.is_local(x):
             return True
-        if type(x) == type(()) and len(x) == 2:
+        if isinstance(x, tuple) and len(x) == 2:
             return True
         return False
 
     def is_predicate(x):
-        if type(x) == type(()) and len(x) == 4 and x[0] == 'predicate':
+        if isinstance(x, tuple) and len(x) == 4 and x[0] == 'predicate':
             return True
         return False
 
@@ -2580,7 +2756,7 @@ def validate_leafref_path(ctx, stmt, path_spec, path,
                     err_add(ctx.errors, pathpos, 'LEAFREF_TOO_MANY_UP',
                             (stmt.arg, stmt.pos))
                     raise NotFound
-                if ptr.keyword in ('augment', 'grouping'):
+                if ptr.keyword in ('augment', 'grouping', 'typedef'):
                     # don't check the path here - check in the expanded tree
                     raise Abort
                 ptr = ptr.parent
@@ -2607,21 +2783,21 @@ def validate_leafref_path(ctx, stmt, path_spec, path,
                 err_add(ctx.errors, pathpos, 'LEAFREF_TOO_MANY_UP',
                         (stmt.arg, stmt.pos))
                 raise NotFound
-        if ptr.keyword in ('augment', 'grouping'):
+        if ptr.keyword in ('augment', 'grouping', 'typedef'):
             # don't check the path here - check in the expanded tree
             raise Abort
         i = 0
         key_list = None
         keys = []
         while i < len(dn):
-            if is_identifier(dn[i]) == True:
+            if is_identifier(dn[i]) is True:
                 (pmodule, name) = find_identifier(dn[i])
                 module_name = pmodule.i_modulename
             elif ptr.keyword == 'list': # predicate on a list, good
                 key_list = ptr
                 keys = []
                 # check each predicate
-                while i < len(dn) and is_predicate(dn[i]) == True:
+                while i < len(dn) and is_predicate(dn[i]) is True:
                     # unpack the predicate
                     (_tag, keyleaf, pup, pdn) = dn[i]
                     (pmodule, pname) = find_identifier(keyleaf)
@@ -2734,8 +2910,8 @@ def validate_leafref_path(ctx, stmt, path_spec, path,
             (ptr.i_module.i_modulename, ptr.arg) in keys):
             err_add(ctx.errors, pathpos, 'LEAFREF_MULTIPLE_KEYS',
                     (ptr.i_module.i_modulename, ptr.arg, stmt.arg, stmt.pos))
-        if ((hasattr(stmt, 'i_config') and stmt.i_config == True) and
-            hasattr(ptr, 'i_config') and ptr.i_config == False
+        if (getattr(stmt, 'i_config', None) is True
+            and getattr(ptr, 'i_config', None) is False
             and not accept_non_config_target):
             err_add(ctx.errors, pathpos, 'LEAFREF_BAD_CONFIG',
                     (stmt.arg, ptr.arg, ptr.pos))
@@ -2808,7 +2984,10 @@ class Statement(object):
         """pointer to the top-level Statement"""
 
         self.parent = parent
-        """pointer to the parent Statement"""
+        """pointer to the parent Statement, maybe on semantics"""
+
+        self.stmt_parent = parent
+        """pointer to the parent Statement, just on statement"""
 
         self.pos = copy.copy(pos)
         """position in input stream, for error reporting"""
@@ -2839,14 +3018,21 @@ class Statement(object):
         return '<pyang.%s \'%s\' at %#x>' % (self.__class__.__name__,
                                              self.__str__(), id(self))
 
+    def internal_reset(self):
+        for cls in self.__class__.mro():
+            for s in getattr(cls, '__slots__', ()):
+                if s.startswith('i_') and hasattr(self, s):
+                    delattr(self, s)
+        for s in self.substmts:
+            s.internal_reset()
+
     def search(self, keyword, children=None, arg=None):
         """Return list of receiver's substmts with `keyword`.
         """
         if children is None:
             children = self.substmts
-        return [ ch for ch in children
-                 if (ch.keyword == keyword and
-                     (arg is None or ch.arg == arg))]
+        return [ch for ch in children
+                if ch.keyword == keyword and (arg is None or ch.arg == arg)]
 
     def search_one(self, keyword, arg=None, children=None):
         """Return receiver's substmt with `keyword` and optionally `arg`.
@@ -2859,7 +3045,7 @@ class Statement(object):
         return None
 
     def copy(self, parent=None, uses=None, uses_top=True,
-             nocopy=[], ignore=[], copyf=None):
+             nocopy=(), ignore=(), copyf=None):
         new = copy.copy(self)
         new.pos = copy.copy(new.pos)
         if uses is not None:
@@ -2871,7 +3057,7 @@ class Statement(object):
                 new.i_uses = [uses]
             new.i_uses_pos = uses.pos
             new.i_uses_top = uses_top
-        if parent == None:
+        if parent is None:
             new.parent = self.parent
         else:
             new.parent = parent
@@ -2898,18 +3084,23 @@ class Statement(object):
     def pprint(self, indent='', f=None):
         """debug function"""
         if self.arg is not None:
-          print(indent + util.keyword_to_str(self.keyword) + " " + self.arg)
+            print(indent + util.keyword_to_str(self.keyword) + " " + self.arg)
         else:
-          print(indent + util.keyword_to_str(self.keyword))
+            print(indent + util.keyword_to_str(self.keyword))
         if f is not None:
-             f(self, indent)
+            f(self, indent)
         for x in self.substmts:
             x.pprint(indent + ' ', f)
-        if hasattr(self, 'i_children') and len(self.i_children) > 0:
-           print(indent + '--- BEGIN i_children ---')
-           for x in self.i_children:
-               x.pprint(indent + ' ', f)
-           print(indent + '--- END i_children ---')
+        try:
+            children = self.i_children
+        except AttributeError:
+            pass
+        else:
+            if children:
+                print(indent + '--- BEGIN i_children ---')
+                for child in children:
+                    child.pprint(indent + ' ', f)
+                print(indent + '--- END i_children ---')
 
 class ModSubmodStatement(Statement):
     __slots__ = (
@@ -2926,6 +3117,7 @@ class ModSubmodStatement(Statement):
         'i_including_modulename',
         'i_ctx',
         'i_undefined_augment_nodes',
+        'i_is_primary_module',
 
         # see v_grammar_module()
         'i_latest_revision',
@@ -2933,8 +3125,12 @@ class ModSubmodStatement(Statement):
 
     def __init__(self, top, parent, pos, keyword, arg=None):
         Statement.__init__(self, top, parent, pos, keyword, arg)
+        self.i_is_primary_module = False
         self.i_is_validated = False
 
+    def internal_reset(self):
+        Statement.internal_reset(self)
+        self.i_is_validated = False
 
     def prune(self):
         def p(n):
@@ -2972,6 +3168,11 @@ class BitStatement(Statement):
         'i_position',
     )
 
+class CommentStatement(Statement):
+    __slots__ = (
+        'i_line_end',
+        'i_multi_line',
+    )
 
 class ChoiceStatement(Statement):
     __slots__ = (
@@ -3110,6 +3311,7 @@ STMT_CLASS_FOR_KEYWD = {
     'uses': UsesStatement,
     'must': MustStatement,
     'when': WhenStatement,
+    '_comment': CommentStatement,
     # all other keywords can use generic Statement class
 }
 
@@ -3117,7 +3319,7 @@ def print_tree(stmt, substmts=True, i_children=True, indent=0):
     istr = "  "
     print("%s%s %s      %s %s" % (indent * istr, stmt.keyword,
                                   stmt.arg, stmt, stmt.parent))
-    if substmts and stmt.substmts != []:
+    if substmts and stmt.substmts:
         print("%s  substatements:" % (indent * istr))
         for s in stmt.substmts:
             print_tree(s, substmts, i_children, indent+1)
@@ -3128,17 +3330,22 @@ def print_tree(stmt, substmts=True, i_children=True, indent=0):
 
 def mk_path_list(stmt):
     """Derives a list of tuples containing
-    (module name, prefix, xpath)
+    (module name, prefix, xpath, keys)
     per node in the statement.
     """
     resolved_names = []
     def resolve_stmt(stmt, resolved_names):
-        if stmt.keyword in ['choice', 'case', 'input', 'output']:
+        if stmt.keyword in ['case', 'input', 'output']:
             resolve_stmt(stmt.parent, resolved_names)
             return
         def qualified_name_elements(stmt):
-            """(module name, prefix, name)"""
-            return (stmt.i_module.arg, stmt.i_module.i_prefix, stmt.arg)
+            """(module name, prefix, name, keys)"""
+            return (
+                stmt.i_module.arg,
+                stmt.i_module.i_prefix,
+                stmt.arg,
+                get_keys(stmt)
+            )
         if stmt.parent.keyword in ['module', 'submodule']:
             resolved_names.append(qualified_name_elements(stmt))
             return
@@ -3153,7 +3360,8 @@ def mk_path_str(stmt,
                 with_prefixes=False,
                 prefix_onchange=False,
                 prefix_to_module=False,
-                resolve_top_prefix_to_module=False):
+                resolve_top_prefix_to_module=False,
+                with_keys=False):
     """Returns the XPath path of the node.
     with_prefixes indicates whether or not to prefix every node.
 
@@ -3165,13 +3373,15 @@ def mk_path_str(stmt,
     resolve_top_prefix_to_module resolves the module-level prefix
       to the module name.
 
+    with_keys will include "[key]" to indicate the key names in the XPath.
+
     Prefixes may be included in the path if the prefix changes mid-path.
     """
     resolved_names = mk_path_list(stmt)
     xpath_elements = []
     last_prefix = None
     for index, resolved_name in enumerate(resolved_names):
-        module_name, prefix, node_name = resolved_name
+        module_name, prefix, node_name, node_keys = resolved_name
         xpath_element = node_name
         if with_prefixes or (prefix_onchange and prefix != last_prefix):
             new_prefix = prefix
@@ -3179,12 +3389,16 @@ def mk_path_str(stmt,
                 (index == 0 and resolve_top_prefix_to_module)):
                 new_prefix = module_name
             xpath_element = '%s:%s' % (new_prefix, node_name)
+        if with_keys and node_keys:
+            for node_key in node_keys:
+                xpath_element = '%s[%s]' % (xpath_element, node_key)
         xpath_elements.append(xpath_element)
         last_prefix = prefix
     return '/%s' % '/'.join(xpath_elements)
 
-def get_xpath(stmt, qualified=False, prefix_to_module=False):
-    """Gets the XPath of the statement.
+def get_xpath(stmt, qualified=False, prefix_to_module=False, with_keys=False):
+    """Gets the XPath path of the data node `stmt`.
+
     Unless qualified=True, does not include prefixes unless the prefix
       changes mid-XPath.
 
@@ -3192,18 +3406,27 @@ def get_xpath(stmt, qualified=False, prefix_to_module=False):
 
     prefix_to_module will resolve prefixes to module names instead.
 
+    with_keys will include "[key]" to indicate the key names in the XPath.
+
     For RFC 8040, set prefix_to_module=True:
-      /prefix:root/node/prefix:node/...
+      /module1:root/node/module2:node/...
 
     qualified=True:
-      /prefix:root/prefix:node/prefix:node/...
+      /prefix1:root/prefix1:node/prefix2:node/...
 
     qualified=True, prefix_to_module=True:
-      /module:root/module:node/module:node/...
-    prefix_to_module=True: /module:root/node/module:node/...
+      /module1:root/module1:node/module2:node/...
+
+    prefix_to_module=True, with_keys=True:
+      /module1:root/node[name][name2]/module2:node/...
     """
-    return mk_path_str(stmt, with_prefixes=qualified,
-                       prefix_onchange=True, prefix_to_module=prefix_to_module)
+    return mk_path_str(
+        stmt,
+        with_prefixes=qualified,
+        prefix_onchange=True,
+        prefix_to_module=prefix_to_module,
+        with_keys=with_keys
+    )
 
 def get_type(stmt):
     """Gets the immediate, top-level type of the node.
@@ -3212,6 +3435,17 @@ def get_type(stmt):
     type_obj = stmt.search_one('type')
     # Return type value if exists
     return getattr(type_obj, 'arg', None)
+
+def get_keys(stmt):
+    """Gets the key names for the node if present.
+    Returns a list of key name strings.
+    """
+    key_obj = stmt.search_one('key')
+    key_names = []
+    keys = getattr(key_obj, 'arg', None)
+    if keys:
+        key_names = keys.split()
+    return key_names
 
 def get_qualified_type(stmt):
     """Gets the qualified, top-level type of the node.

@@ -21,24 +21,28 @@ module g {
           second line";
     container
       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa {
-        description
-          "first line \"
-              second line";
+      description
+        "first line \"
+            second line";
+      container
+        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb {
         container
-          bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb {
-            container
-              cccccccccccccccccccccccccccccccccccccc {
-                leaf x {
-                  type string;
-                }
-            }
+          cccccccccccccccccccccccccccccccccccccc {
+          leaf x {
+            type string;
+          }
         }
+      }
     }
     leaf foo {
       type leafref {
-        // FIXME: we want to be able to break this path!
-        path
-          "/x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccc/x";
+        path "/x"
+           + "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+           + "aaaaa"
+           + "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+           + "bbbbb"
+           + "/ccccccccccccccccccccccccccccccccc"
+           + "ccccc/x";
       }
       description
         "first line

@@ -1,6 +1,5 @@
 MANIFEST
 TAGS
-build
 dist
 # created during build:
 pyang.egg-info
@@ -15,6 +14,8 @@ schemas.xml
 *.egg-info
 *.idea
 .coverage*
+.profile*
+venv/
 /test/test_*/*.dsrl
 /test/test_*/*.rng
 /test/test_*/*.sch
