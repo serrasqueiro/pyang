@@ -12,6 +12,14 @@ from pyang import error
 from pyang.error import err_add
 from pyang.plugins import lint
 
+LEAN = 1
+
+AVOID_TABS_AT_KEYWORDS = (
+    "description",
+    "key",
+)
+
+
 def pyang_plugin_init():
     plugin.register_plugin(IETFPlugin())
 
@@ -73,6 +81,10 @@ class IETFPlugin(lint.LintPlugin):
             + ' missing or is not correct'
             + ' (see pyang --ietf-help for details).')
 
+        error.add_error_code(
+            'TEXT_INVALID_TAB', 4,
+            'RFC 7950 section 6.1.3 (Quoting in text) invalid')
+
     def pre_validate_ctx(self, ctx, modules):
         for mod in modules:
             self.mmap[mod.arg] = {
@@ -88,6 +100,17 @@ class IETFPlugin(lint.LintPlugin):
             if m is not None:
                 self.mmap[s.i_module.arg]['found_8174'] = True
                 arg = arg[:m.start()] + arg[m.end():]
+
+            if re_tlp.search(arg) is None:
+                if LEAN == 0:
+                    err_add(ctx.errors, s.pos,
+                            'IETF_MISSING_TRUST_LEGAL_PROVISIONING', ())
+        if LEAN != 0:
+            if s.keyword in AVOID_TABS_AT_KEYWORDS:
+                if "\t" in s.arg:
+                        err_add(ctx.errors, s.pos,
+                                'TEXT_INVALID_TAB', ())
+
             m = re_tlp.search(arg)
             if m is None:
                 err_add(ctx.errors, s.pos,
@@ -105,6 +128,7 @@ class IETFPlugin(lint.LintPlugin):
                 if m is None:
                     err_add(ctx.errors, s.pos,
                         'IETF_MISSING_RFC_TEXT', ())
+>>>>>>> master
         if not self.mmap[s.i_module.arg]['found_2119_keywords']:
             if re_2119_keywords.search(arg) is not None:
                 self.mmap[s.i_module.arg]['found_2119_keywords'] = True
