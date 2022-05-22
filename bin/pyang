@@ -18,13 +18,12 @@ from pyang import util
 from pyang import hello
 from pyang import context
 from pyang import repository
-from pyang import statements
 from pyang import syntax
 
 # pylint: disable=missing-function-docstring, unused-argument, no-else-return
 
 DEBUG = 0
-PATCH_LEVEL = "p057"
+PATCH_LEVEL = "p061"
 BASIC_DEFAULT_OPTS = (
     "--strict --canonical",
 )
@@ -32,10 +31,14 @@ BASIC_DEFAULT_OPTS = (
 
 def main():
     err = sys.stderr
+    check = [adir for adir in sys.path if "/pyang/pyang" in adir.replace("\\", "/")]
     param = sys.argv[1:]
     these = ' '.join(BASIC_DEFAULT_OPTS).split(" ") + guess_paths(err, os.environ)
     args = [sys.argv[0]] + param + these
-    run(args)
+    if check:
+        print("Bad PYTHONPATH variable?", check)
+    else:
+        run(args)
 
 def run(args:list):
     """ Main pyang run """
@@ -650,7 +653,7 @@ def yang_files(path:str) -> list:
         print("FILES:", res)
     return res
 
-def guess_paths(err, env: dict, arg_like=True) -> list:
+def guess_paths(err, env, arg_like=True) -> list:
     """ Returns an empty list if $YANG_CONF is not defined.
     Note, this is not 'YANG_MODPATH'
     """
