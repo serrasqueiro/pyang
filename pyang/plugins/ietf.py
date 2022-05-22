@@ -128,7 +128,7 @@ class IETFPlugin(lint.LintPlugin):
                 if m is None:
                     err_add(ctx.errors, s.pos,
                         'IETF_MISSING_RFC_TEXT', ())
->>>>>>> master
+
         if not self.mmap[s.i_module.arg]['found_2119_keywords']:
             if re_2119_keywords.search(arg) is not None:
                 self.mmap[s.i_module.arg]['found_2119_keywords'] = True
