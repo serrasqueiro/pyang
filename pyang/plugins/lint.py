@@ -239,12 +239,23 @@ def v_chk_recommended_substmt(ctx, stmt):
                         (s, stmt.keyword, r))
 
 def v_chk_namespace(ctx, stmt, namespace_prefixes):
+    exp_list = []
     if namespace_prefixes:
         for prefix in namespace_prefixes:
-            if stmt.arg == prefix + stmt.i_module.arg:
+            mname = stmt.i_module.arg
+            suffix = "/~"
+            if prefix.endswith(suffix):
+                alfa = prefix[:-len(suffix)].split("/")
+                beta = alfa[-1]
+                prefix = '/'.join(alfa[:-1]) + '/'
+                if mname.startswith(beta + "-"):
+                    mname = beta + "/" + mname[len(beta)+1:]
+            expected = prefix + mname
+            exp_list.append(expected)
+            if stmt.arg == expected:
                 return
         err_add(ctx.errors, stmt.pos, 'LINT_BAD_NAMESPACE_VALUE',
-                namespace_prefixes[0] + stmt.i_module.arg)
+                '|'.join(exp_list))
 
 def v_chk_module_name(ctx, stmt, modulename_prefixes):
     if modulename_prefixes:

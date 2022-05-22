@@ -1,6 +1,11 @@
 # pyang #
 
-[![Release](https://img.shields.io/github/v/release/mbj4668/pyang)](https://github.com/mbj4668/pyang/releases) [![Build Status](https://github.com/mbj4668/pyang/actions/workflows/tests.yml/badge.svg)](https://github.com/mbj4668/pyang/actions)
++ Current fork (this repo)
+  * [![Release](https://img.shields.io/github/v/release/serrasqueiro/pyang)](https://github.com/serrasqueiro/pyang/releases) [![Build Status](https://github.com/serrasqueiro/pyang/actions/workflows/tests.yml/badge.svg)](https://github.com/serrasqueiro/pyang/actions)
+  * active branch: `new/ietf_no_41`
+
++ Original
+  * [![Release](https://img.shields.io/github/v/release/mbj4668/pyang)](https://github.com/mbj4668/pyang/releases) [![Build Status](https://github.com/mbj4668/pyang/actions/workflows/tests.yml/badge.svg)](https://github.com/mbj4668/pyang/actions)
 
 ## Overview ##
 
@@ -178,5 +183,11 @@ man pyang
 * **schema**
   Contains RELAX NG schemas and pattern libraries.
 
+## References
 
+* References to IETF RFC (_to do..._)
 
+## Hints
+
+* Do not use local branching,
+  + `git remote prune origin`

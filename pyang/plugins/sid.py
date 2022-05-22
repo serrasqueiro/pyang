@@ -168,7 +168,7 @@ pyang [--sid-list] --sid-check-file sid-filename yang-filename
 
 OPTIONS
 
---sid-generate-file
+--generate-sid-file
 
   This option is used to generate a new .sid file from a YANG module.
 
@@ -185,7 +185,7 @@ OPTIONS
 
   $ pyang --sid-generate-file 20000:100 toaster@2009-11-20.yang
 
---sid-update-file
+--update-sid-file
 
   Each time new items are added to a YANG module by the introduction of a new
   revision of this module, its included sub-modules or imported modules, the
@@ -203,7 +203,7 @@ OPTIONS
 
   $ pyang --sid-update-file toaster@2009-11-20.sid toaster@2009-12-28.yang
 
--- sid-check-file
+-- check-sid-file
 
   The --sid-check-file option can be used at any time to verify if a .sid file
   need to be updated.
@@ -215,14 +215,14 @@ OPTIONS
 
   $ pyang --sid-check-file toaster@2009-12-28.sid toaster@2009-12-28.yang
 
---sid-list
+--list_sid
 
-  The --sid-list option can be used before any of the previous options to
+  The --list_sid option can be used before any of the previous options to
   obtains the list of SIDs assigned or validated. For example:
 
-  $ pyang --sid-list --sid-generate-file 20000:100 toaster@2009-11-20.yang
+  $ pyang --list-sid --sid-generate-file 20000:100 toaster@2009-11-20.yang
 
---sid-extra-range
+--extra-sid-range
 
   If needed, an extra SID range can be assigned to an existing YANG module
   during its update with the --sid-extra-range option.
@@ -234,7 +234,7 @@ OPTIONS
   $ pyang --sid-update-file toaster@2009-11-20.sid
           toaster@2009-12-28.yang --sid-extra-range 20100:100
 
---sid-extra-range-count
+count
   The number of SID required when generating or updating a .sid file can be
   computed by specifying "count" as SID range.
 
@@ -732,7 +732,7 @@ class SidFile:
             status = ""
             if item['status'] == 'n' and not self.sid_file_created:
                 status = " (New)"
-            if item['status'] == 'd' and item['namespace'] != 'module':
+            if item['status'] == 'd':
                 status = " (Remove)"
                 definition_removed = True
 
