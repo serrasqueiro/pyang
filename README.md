@@ -1,5 +1,16 @@
 # pyang #
 
+About this fork:
+- This is _serrasqueiro_ fork, [(here)](https://github.com/serrasqueiro/pyang/)
+  + The source of this file is [(here)](https://github.com/serrasqueiro/pyang/blob/new/mydev/README.md)
+- To work here, use the following set of commands:
+```
+git remote add upstream git@github.com:mbj4668/pyang.git
+git checkout master
+git pull upstream master
+git push origin master
+```
+
 [![Release](https://img.shields.io/github/v/release/mbj4668/pyang)](https://github.com/mbj4668/pyang/releases) [![Build Status](https://github.com/mbj4668/pyang/actions/workflows/tests.yml/badge.svg)](https://github.com/mbj4668/pyang/actions)
 
 ## Overview ##
