@@ -244,6 +244,9 @@ class uml_emitter:
             self.emit_uml_header(title, fd)
 
         for module in modules:
+            pre = module.search_one('prefix')
+            if pre is not None:
+                self.thismod_prefix = pre.arg
             if not self.ctx_no_module:
                 self.emit_module_header(module, fd)
             self.emit_module_class(module, fd)
@@ -251,7 +254,7 @@ class uml_emitter:
                 self.emit_stmt(module, s, fd)
 
             if not self.ctx_filterfile:
-                self.post_process_module(fd)
+                self.post_process_module(module, fd)
         if not self.ctx_filterfile:
             self.post_process_diagram(fd)
 
@@ -346,7 +349,7 @@ class uml_emitter:
             elif stmt.keyword == 'feature':
                 self.emit_feature(mod,stmt, fd)
             elif stmt.keyword == 'deviation':
-                self.emit_feature(mod,stmt, fd)
+                self.emit_deviation(mod,stmt, fd)
 
 
         # go down one level and search for good UML roots
@@ -539,10 +542,9 @@ class uml_emitter:
         # pkg name for this module
         #this_pkg = self.make_plantuml_keyword(module.search_one('prefix').arg) + '.' + self.make_plantuml_keyword(module.arg)
         pkg = module.arg
-        pre = module.search_one('prefix')
-        if  pre is not None:
-            self.thismod_prefix = pre.arg
 
+        fd.write('package \"%s:%s\" as %s_%s { \n' %(self.thismod_prefix, pkg, self.make_plantuml_keyword(self.thismod_prefix), self.make_plantuml_keyword(pkg)))
+        fd.write('} \n')
 
         # print package for this module and a class to represent module (notifs and rpcs)
         # print module info as note
@@ -580,12 +582,6 @@ class uml_emitter:
 
         # This package
         fd.write('package \"%s:%s\" as %s_%s { \n' %(self.thismod_prefix, pkg, self.make_plantuml_keyword(self.thismod_prefix), self.make_plantuml_keyword(pkg)))
-
-        if self.ctx_imports:
-            imports = module.search('import')
-            for i in imports:
-                mod = self.make_plantuml_keyword(i.search_one('prefix').arg) + '_' + self.make_plantuml_keyword(i.arg)
-                fd.write('%s +-- %s_%s\n' %(mod,self.make_plantuml_keyword(self.thismod_prefix), self.make_plantuml_keyword(pkg)))
 
         includes = module.search('include')
         for inc in includes:
@@ -662,10 +658,10 @@ class uml_emitter:
 
 
     def emit_feature(self, parent, feature, fd):
-        fd.write('%s : %s \n' %(self.full_path(parent), 'feature : ' + self.make_plantuml_keyword(feature.arg)) )
+        fd.write('%s : %s \n' %(self.full_path(parent), 'feature : ' + feature.arg) )
 
-    def emit_deviation(self, parent, feature, fd):
-        fd.write('%s : %s \n' %(self.full_path(parent), 'deviation : ' + self.make_plantuml_keyword(feature.arg)) )
+    def emit_deviation(self, parent, deviation, fd):
+        fd.write('%s : %s \n' %(self.full_path(parent), 'deviation : ' + deviation.arg) )
 
     def emit_action(self, parent, action, fd):
         fd.write('%s : %s(' %(self.full_path(parent), action.arg) )
@@ -1080,7 +1076,7 @@ class uml_emitter:
             fd.write(augm)
 
 
-    def post_process_module(self, fd):
+    def post_process_module(self, module, fd):
 
         for base in self.baseid:
             if not base in self.identities:
@@ -1094,3 +1090,8 @@ class uml_emitter:
 
         if not self.ctx_no_module:
             fd.write("} \n\n")
+            if self.ctx_imports:
+                imports = module.search('import')
+                for i in imports:
+                    mod = self.make_plantuml_keyword(i.search_one('prefix').arg) + '_' + self.make_plantuml_keyword(i.arg)
+                    fd.write('%s +-- %s_%s\n' %(mod,self.make_plantuml_keyword(self.thismod_prefix), self.make_plantuml_keyword(module.arg)))
